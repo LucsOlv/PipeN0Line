@@ -1,0 +1,18 @@
+{
+  "name": "PipeNoLine",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"pnpm run dev:api\" \"pnpm run dev:web\"",
+    "dev:api": "pnpm --filter @pipenolinete/api dev",
+    "dev:web": "pnpm --filter @pipenolinete/web dev"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.14.0",
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
