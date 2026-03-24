@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { httpBatchLink } from '@trpc/client'
 import { trpc } from './trpc'
+import { AiPlayground } from './components/AiPlayground'
 
 const queryClient = new QueryClient()
 
@@ -26,6 +27,7 @@ export default function App() {
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
         <Hello />
+        <AiPlayground />
       </QueryClientProvider>
     </trpc.Provider>
   )
