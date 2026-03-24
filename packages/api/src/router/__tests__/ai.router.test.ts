@@ -11,7 +11,11 @@ const mockService = {
   ]),
 }
 
-const ctx: TrpcContext = { copilotService: mockService as never }
+const ctx: TrpcContext = {
+  copilotService: mockService as never,
+  configService: {} as never,
+  featureFlagsService: {} as never,
+}
 
 const t = initTRPC.context<TrpcContext>().create()
 const caller = t.createCallerFactory(aiRouter)(ctx)

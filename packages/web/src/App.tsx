@@ -1,34 +1,36 @@
-import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { httpBatchLink } from '@trpc/client'
+import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { trpc } from './trpc'
-import { AiPlayground } from './components/AiPlayground'
+import { AppShell } from './components/layout/AppShell'
+import { DashboardPage } from './pages/DashboardPage'
+import { CreateRunPage } from './pages/CreateRunPage'
+import { SettingsPage } from './pages/SettingsPage'
 
 const queryClient = new QueryClient()
 
 const trpcClient = trpc.createClient({
-  links: [
-    httpBatchLink({
-      url: '/trpc',
-    }),
-  ],
+  links: [httpBatchLink({ url: '/trpc' })],
 })
 
-function Hello() {
-  const [name] = useState('PipeNoLine')
-  const { data, isLoading } = trpc.hello.useQuery({ name })
-
-  if (isLoading) return <p>Loading...</p>
-  return <p>{data?.message}</p>
-}
+const router = createBrowserRouter([
+  {
+    element: <AppShell />,
+    children: [
+      { path: '/', element: <DashboardPage /> },
+      { path: '/run/new', element: <CreateRunPage /> },
+      { path: '/settings', element: <SettingsPage /> },
+    ],
+  },
+])
 
 export default function App() {
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        <Hello />
-        <AiPlayground />
+        <RouterProvider router={router} />
       </QueryClientProvider>
     </trpc.Provider>
   )
 }
+
