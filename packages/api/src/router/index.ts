@@ -4,6 +4,7 @@ import { aiRouter } from './ai.router'
 import { configRouter } from './config.router'
 import { featureFlagsRouter } from './feature-flags.router'
 import { projectsRouter } from './projects.router'
+import { runsRouter } from './runs.router'
 
 export const appRouter = t.mergeRouters(
   helloRouter,
@@ -12,6 +13,7 @@ export const appRouter = t.mergeRouters(
     config: configRouter,
     featureFlags: featureFlagsRouter,
     projects: projectsRouter,
+    runs: runsRouter,
   })
 )
 

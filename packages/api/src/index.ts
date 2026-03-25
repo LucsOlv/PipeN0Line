@@ -20,6 +20,7 @@ const start = async () => {
         copilotService: server.copilotService,
         configService: server.configService,
         featureFlagsService: server.featureFlagsService,
+        runsService: server.runsService,
       }),
     },
   })

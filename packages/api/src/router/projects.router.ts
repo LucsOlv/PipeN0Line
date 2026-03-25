@@ -1,5 +1,7 @@
 import { readdirSync, statSync } from 'fs'
 import { join } from 'path'
+import { z } from 'zod'
+import simpleGit from 'simple-git'
 import { t } from './trpc'
 
 export const projectsRouter = t.router({
@@ -23,4 +25,21 @@ export const projectsRouter = t.router({
       return []
     }
   }),
+
+  branches: t.procedure
+    .input(z.object({ path: z.string() }))
+    .query(async ({ input }) => {
+      const git = simpleGit({ baseDir: input.path, timeout: { block: 5000 } })
+
+      const isRepo = await git.checkIsRepo().catch(() => false)
+      if (!isRepo) return { branches: [], isGitRepo: false }
+
+      try {
+        const result = await git.branchLocal()
+        return { branches: result.all, isGitRepo: true }
+      } catch {
+        return { branches: [], isGitRepo: true }
+      }
+    }),
 })
+

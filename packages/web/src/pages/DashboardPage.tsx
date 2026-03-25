@@ -1,7 +1,47 @@
-import { mockPipelines } from '../data/mock'
+import { trpc } from '../trpc'
 import { PipelineCard } from '../components/pipeline/PipelineCard'
+import type { Pipeline } from '../types/pipeline'
+import { Icon } from '../components/ui/Icon'
+import { useNavigate } from 'react-router-dom'
+
+function mapRunToPipeline(run: {
+  id: number
+  projectName: string
+  branch: string
+  status: string
+  createdAt: string
+}): Pipeline {
+  const statusMap: Record<string, Pipeline['status']> = {
+    pending: 'pending',
+    running: 'running',
+    completed: 'completed',
+    stopped: 'stopped',
+    error: 'stopped',
+  }
+
+  return {
+    id: String(run.id),
+    tag: `RUN-${run.id}`,
+    name: run.projectName,
+    status: statusMap[run.status] ?? 'pending',
+    steps: [
+      {
+        id: 'branch',
+        name: run.branch,
+        status: run.status === 'completed' ? 'done' : run.status === 'running' ? 'running' : run.status === 'stopped' || run.status === 'error' ? 'error' : 'pending',
+        duration: new Date(run.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
+        icon: 'account_tree',
+      },
+    ],
+  }
+}
 
 export function DashboardPage() {
+  const navigate = useNavigate()
+  const { data: runs, isLoading } = trpc.runs.list.useQuery()
+
+  const pipelines = runs?.map(mapRunToPipeline) ?? []
+
   return (
     <>
       <header className="mb-12">
@@ -14,9 +54,39 @@ export function DashboardPage() {
       </header>
 
       <section className="space-y-6">
-        {mockPipelines.map((pipeline) => (
-          <PipelineCard key={pipeline.id} pipeline={pipeline} />
-        ))}
+        {isLoading ? (
+          /* Loading skeleton */
+          [1, 2].map((i) => (
+            <div key={i} className="glass-effect rounded-xl p-6 border border-white/5 animate-pulse">
+              <div className="h-4 bg-surface-container-high rounded w-1/3 mb-3" />
+              <div className="h-3 bg-surface-container rounded w-1/2" />
+            </div>
+          ))
+        ) : pipelines.length > 0 ? (
+          pipelines.map((pipeline) => (
+            <PipelineCard key={pipeline.id} pipeline={pipeline} />
+          ))
+        ) : (
+          /* Empty state */
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center mb-6">
+              <Icon name="inbox" size={32} className="text-on-surface-variant" />
+            </div>
+            <h2 className="text-lg font-semibold text-on-surface mb-2 font-space-grotesk">
+              Nenhuma execução ainda
+            </h2>
+            <p className="text-on-surface-variant text-sm mb-6 max-w-xs">
+              Crie a primeira execução selecionando um projeto e branch.
+            </p>
+            <button
+              onClick={() => navigate('/run/new')}
+              className="flex items-center gap-2 px-5 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-medium hover:brightness-110 active:scale-95 transition-all"
+            >
+              <Icon name="add" size={18} />
+              Nova Execução
+            </button>
+          </div>
+        )}
       </section>
 
       <footer className="mt-16 pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">

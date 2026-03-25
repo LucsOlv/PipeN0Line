@@ -3,20 +3,36 @@ import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/ui/Icon'
 import { trpc } from '../trpc'
 
-const branches = ['main', 'develop', 'staging']
-
 export function CreateRunPage() {
   const navigate = useNavigate()
-  const [project, setProject] = useState('')
+  const [projectPath, setProjectPath] = useState('')
+  const [projectName, setProjectName] = useState('')
   const [branch, setBranch] = useState('')
   const [debugMode, setDebugMode] = useState(true)
 
   const { data: projects, isLoading: projectsLoading } = trpc.projects.list.useQuery()
+  const { data: branchData, isLoading: branchesLoading } = trpc.projects.branches.useQuery(
+    { path: projectPath },
+    { enabled: !!projectPath, retry: 0, staleTime: 30_000 }
+  )
+  const branches = branchData?.branches ?? []
+  const isGitRepo = branchData?.isGitRepo ?? true // assume git until proven otherwise
+
+  const createRun = trpc.runs.create.useMutation({
+    onSuccess: () => navigate('/'),
+  })
+
+  const handleProjectChange = (path: string) => {
+    const found = projects?.find((p) => p.path === path)
+    setProjectPath(path)
+    setProjectName(found?.name ?? '')
+    setBranch('')
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: connect to trpc.ai or pipeline mutation
-    navigate('/')
+    if (!projectPath || !branch) return
+    createRun.mutate({ projectName, projectPath, branch, debugMode })
   }
 
   return (
@@ -49,8 +65,8 @@ export function CreateRunPage() {
               </label>
               <div className="relative group">
                 <select
-                  value={project}
-                  onChange={(e) => setProject(e.target.value)}
+                  value={projectPath}
+                  onChange={(e) => handleProjectChange(e.target.value)}
                   disabled={projectsLoading}
                   className="w-full bg-surface-container-low text-on-surface px-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest appearance-none transition-all cursor-pointer disabled:opacity-50"
                 >
@@ -95,30 +111,86 @@ export function CreateRunPage() {
               <label className="block text-sm font-semibold text-on-surface-variant font-label">
                 Branch
               </label>
-              <div className="relative group">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60">
-                  <Icon name="account_tree" className="text-lg" />
-                </span>
-                <input
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                  className="w-full bg-surface-container-low text-on-surface pl-12 pr-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest transition-all placeholder:text-on-surface-variant/40"
-                  placeholder="main, develop, feature/xxx"
-                  type="text"
-                />
-              </div>
-              <div className="flex gap-2 pt-1">
-                {branches.map((b) => (
-                  <button
-                    key={b}
-                    type="button"
-                    onClick={() => setBranch(b)}
-                    className="px-2 py-1 bg-surface-container-highest text-[10px] text-on-surface-variant rounded border border-white/5 cursor-pointer hover:border-primary/40 transition-colors"
+
+              {/* Loading state */}
+              {branchesLoading && projectPath ? (
+                <div className="flex items-center gap-3 bg-surface-container-low px-4 py-4 rounded-xl text-on-surface-variant text-sm">
+                  <Icon name="progress_activity" className="animate-spin text-primary" size={18} />
+                  <span>Lendo branches do repositório...</span>
+                </div>
+
+              /* Not a git repo */
+              ) : projectPath && !isGitRepo ? (
+                <>
+                  <div className="flex items-center gap-3 bg-surface-container-low border border-outline-variant/40 px-4 py-4 rounded-xl text-sm">
+                    <Icon name="info" size={18} className="text-on-surface-variant flex-shrink-0" />
+                    <span className="text-on-surface-variant">
+                      Este projeto não tem repositório Git. Digite o branch manualmente.
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60">
+                      <Icon name="account_tree" className="text-lg" />
+                    </span>
+                    <input
+                      value={branch}
+                      onChange={(e) => setBranch(e.target.value)}
+                      className="w-full bg-surface-container-low text-on-surface pl-12 pr-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest transition-all placeholder:text-on-surface-variant/40"
+                      placeholder="main, develop, feature/xxx"
+                      type="text"
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    {['main', 'develop', 'staging'].map((b) => (
+                      <button
+                        key={b}
+                        type="button"
+                        onClick={() => setBranch(b)}
+                        className="px-2 py-1 bg-surface-container-highest text-[10px] text-on-surface-variant rounded border border-white/5 cursor-pointer hover:border-primary/40 transition-colors"
+                      >
+                        {b}
+                      </button>
+                    ))}
+                  </div>
+                </>
+
+              /* Git repo with branches */
+              ) : projectPath && branches.length > 0 ? (
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60 pointer-events-none">
+                    <Icon name="account_tree" className="text-lg" />
+                  </span>
+                  <select
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                    className="w-full bg-surface-container-low text-on-surface pl-12 pr-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest appearance-none transition-all cursor-pointer"
                   >
-                    {b}
-                  </button>
-                ))}
-              </div>
+                    <option value="" disabled>Selecione um branch...</option>
+                    {branches.map((b) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-on-surface-variant">
+                    <Icon name="expand_more" />
+                  </div>
+                </div>
+
+              /* No project selected yet or fallback text input */
+              ) : (
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60">
+                    <Icon name="account_tree" className="text-lg" />
+                  </span>
+                  <input
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                    className="w-full bg-surface-container-low text-on-surface pl-12 pr-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest transition-all placeholder:text-on-surface-variant/40"
+                    placeholder="Selecione um projeto primeiro"
+                    type="text"
+                    disabled={!projectPath}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Debug Mode */}
@@ -142,14 +214,24 @@ export function CreateRunPage() {
               </div>
             </div>
 
+            {/* Error */}
+            {createRun.isError && (
+              <p className="text-sm text-error flex items-center gap-1">
+                <Icon name="error" size={16} /> Erro ao criar execução. Tente novamente.
+              </p>
+            )}
+
             {/* Actions */}
             <div className="flex flex-col sm:flex-row gap-4 pt-6">
               <button
                 type="submit"
-                className="flex-1 bg-gradient-to-b from-primary to-primary-dim text-on-primary font-bold py-4 px-8 rounded-xl hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                disabled={!projectPath || !branch || createRun.isPending}
+                className="flex-1 bg-gradient-to-b from-primary to-primary-dim text-on-primary font-bold py-4 px-8 rounded-xl hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Icon name="play_arrow" fill className="text-xl" />
-                Confirmar / Iniciar
+                {createRun.isPending
+                  ? <><Icon name="progress_activity" className="animate-spin" /> Criando...</>
+                  : <><Icon name="play_arrow" fill className="text-xl" /> Confirmar / Iniciar</>
+                }
               </button>
               <button
                 type="button"
@@ -175,24 +257,23 @@ export function CreateRunPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
-            <div className="bg-surface-container rounded-xl p-6 border border-white/5">
-              <p className="text-[10px] text-on-surface-variant uppercase tracking-widest mb-4">
-                Última Build
-              </p>
-              <p className="text-2xl font-bold font-headline">#8291</p>
-              <div className="mt-2 flex items-center gap-1 text-[10px] text-tertiary">
-                <Icon name="check_circle" className="text-xs" /> SUCESSO
-              </div>
+          {/* Selected project info */}
+          {projectPath && (
+            <div className="bg-surface-container rounded-xl p-6 border border-white/5 space-y-3">
+              <p className="text-[10px] text-on-surface-variant uppercase tracking-widest">Projeto Selecionado</p>
+              <p className="text-sm font-bold text-on-surface">{projectName}</p>
+              <p className="text-[10px] text-on-surface-variant truncate font-mono">{projectPath}</p>
+              {branch && (
+                <div className="flex items-center gap-1.5 text-xs text-primary">
+                  <Icon name="account_tree" size={14} />
+                  <span>{branch}</span>
+                </div>
+              )}
+              {branches.length > 0 && (
+                <p className="text-[10px] text-on-surface-variant">{branches.length} branches disponíveis</p>
+              )}
             </div>
-            <div className="bg-surface-container rounded-xl p-6 border border-white/5">
-              <p className="text-[10px] text-on-surface-variant uppercase tracking-widest mb-4">
-                Custo Est.
-              </p>
-              <p className="text-2xl font-bold font-headline">$0.42</p>
-              <div className="mt-2 text-[10px] text-on-surface-variant">p/ execução</div>
-            </div>
-          </div>
+          )}
 
           <div className="flex-1 bg-surface-container-low rounded-xl p-8 border border-white/5 relative overflow-hidden flex flex-col">
             <p className="text-xs font-bold text-on-surface-variant mb-6 flex items-center gap-2">

@@ -15,6 +15,7 @@ const ctx: TrpcContext = {
   copilotService: mockService as never,
   configService: {} as never,
   featureFlagsService: {} as never,
+  runsService: {} as never,
 }
 
 const t = initTRPC.context<TrpcContext>().create()
