@@ -19,6 +19,8 @@ const statusTextColor: Record<Pipeline['status'], string> = {
 
 interface PipelineCardProps {
   pipeline: Pipeline
+  score?: number | null
+  onClick?: () => void
   onStart?: () => void
   onStop?: () => void
   onSkip?: () => void
@@ -27,11 +29,14 @@ interface PipelineCardProps {
   onLogs?: () => void
 }
 
-export function PipelineCard({ pipeline, onStart, onStop, onSkip, onResume, onRetry, onLogs }: PipelineCardProps) {
+export function PipelineCard({ pipeline, score, onClick, onStart, onStop, onSkip, onResume, onRetry, onLogs }: PipelineCardProps) {
   const { status } = pipeline
 
   return (
-    <div className="bg-surface-container-high rounded-xl p-6 border border-white/5 shadow-2xl relative overflow-hidden">
+    <div
+      onClick={onClick}
+      className={`bg-surface-container-high rounded-xl p-6 border border-white/5 shadow-2xl relative overflow-hidden ${onClick ? 'cursor-pointer hover:border-white/10 transition-colors' : ''}`}
+    >
       {status === 'running' && (
         <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 blur-[100px] -z-10" />
       )}
@@ -53,6 +58,12 @@ export function PipelineCard({ pipeline, onStart, onStop, onSkip, onResume, onRe
         </div>
 
         <div className="flex items-center gap-3">
+          {score != null && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-container-highest border border-white/5">
+              <Icon name="grade" fill className="text-sm text-tertiary" />
+              <span className="text-sm font-bold font-space-grotesk text-tertiary">{score}/10</span>
+            </div>
+          )}
           {status === 'running' && (
             <>
               <ActionButton onClick={onStart} icon="play_arrow" label="Start" fill />
@@ -67,7 +78,7 @@ export function PipelineCard({ pipeline, onStart, onStop, onSkip, onResume, onRe
             </>
           )}
           {status === 'completed' && (
-            <ActionButton onClick={onLogs} icon="visibility" label="Logs" />
+            <ActionButton onClick={onLogs} icon="visibility" label="Ver análise" />
           )}
         </div>
       </div>
@@ -102,7 +113,7 @@ function ActionButton({ onClick, icon, label, fill = false, variant = 'default' 
   }
 
   return (
-    <button className={variants[variant]} onClick={onClick}>
+    <button className={variants[variant]} onClick={(e) => { e.stopPropagation(); onClick?.() }}>
       <Icon name={icon} fill={fill} className="text-sm" />
       <span className="text-xs font-bold px-1">{label}</span>
     </button>

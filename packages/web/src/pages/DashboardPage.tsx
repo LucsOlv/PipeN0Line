@@ -38,7 +38,14 @@ function mapRunToPipeline(run: {
 
 export function DashboardPage() {
   const navigate = useNavigate()
-  const { data: runs, isLoading } = trpc.runs.list.useQuery()
+  const { data: runs, isLoading } = trpc.runs.list.useQuery(undefined, {
+    refetchInterval: (query) => {
+      const hasActive = query.state.data?.some(
+        (r) => r.status === 'pending' || r.status === 'running'
+      )
+      return hasActive ? 2000 : false
+    },
+  })
 
   const pipelines = runs?.map(mapRunToPipeline) ?? []
 
@@ -55,7 +62,6 @@ export function DashboardPage() {
 
       <section className="space-y-6">
         {isLoading ? (
-          /* Loading skeleton */
           [1, 2].map((i) => (
             <div key={i} className="glass-effect rounded-xl p-6 border border-white/5 animate-pulse">
               <div className="h-4 bg-surface-container-high rounded w-1/3 mb-3" />
@@ -63,11 +69,16 @@ export function DashboardPage() {
             </div>
           ))
         ) : pipelines.length > 0 ? (
-          pipelines.map((pipeline) => (
-            <PipelineCard key={pipeline.id} pipeline={pipeline} />
+          pipelines.map((pipeline, i) => (
+            <PipelineCard
+              key={pipeline.id}
+              pipeline={pipeline}
+              score={runs?.[i]?.score}
+              onClick={() => navigate(`/run/${pipeline.id}`)}
+              onLogs={() => navigate(`/run/${pipeline.id}`)}
+            />
           ))
         ) : (
-          /* Empty state */
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center mb-6">
               <Icon name="inbox" size={32} className="text-on-surface-variant" />
@@ -111,3 +122,4 @@ export function DashboardPage() {
     </>
   )
 }
+

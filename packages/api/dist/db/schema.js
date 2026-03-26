@@ -1,0 +1,29 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.pipelineRuns = exports.featureFlags = exports.appConfig = void 0;
+const sqlite_core_1 = require("drizzle-orm/sqlite-core");
+const drizzle_orm_1 = require("drizzle-orm");
+exports.appConfig = (0, sqlite_core_1.sqliteTable)('app_config', {
+    key: (0, sqlite_core_1.text)('key').primaryKey(),
+    value: (0, sqlite_core_1.text)('value').notNull().default(''),
+    description: (0, sqlite_core_1.text)('description').notNull().default(''),
+});
+exports.featureFlags = (0, sqlite_core_1.sqliteTable)('feature_flags', {
+    key: (0, sqlite_core_1.text)('key').primaryKey(),
+    enabled: (0, sqlite_core_1.integer)('enabled', { mode: 'boolean' }).notNull().default(false),
+    description: (0, sqlite_core_1.text)('description').notNull().default(''),
+});
+exports.pipelineRuns = (0, sqlite_core_1.sqliteTable)('pipeline_runs', {
+    id: (0, sqlite_core_1.integer)('id').primaryKey({ autoIncrement: true }),
+    projectName: (0, sqlite_core_1.text)('project_name').notNull(),
+    projectPath: (0, sqlite_core_1.text)('project_path').notNull(),
+    branch: (0, sqlite_core_1.text)('branch').notNull(),
+    debugMode: (0, sqlite_core_1.integer)('debug_mode', { mode: 'boolean' }).notNull().default(false),
+    status: (0, sqlite_core_1.text)('status').notNull().default('pending'),
+    score: (0, sqlite_core_1.integer)('score'),
+    issues: (0, sqlite_core_1.text)('issues'),
+    summary: (0, sqlite_core_1.text)('summary'),
+    startedAt: (0, sqlite_core_1.text)('started_at'),
+    completedAt: (0, sqlite_core_1.text)('completed_at'),
+    createdAt: (0, sqlite_core_1.text)('created_at').notNull().default((0, drizzle_orm_1.sql) `(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+});

@@ -20,5 +20,10 @@ export const pipelineRuns = sqliteTable('pipeline_runs', {
   branch: text('branch').notNull(),
   debugMode: integer('debug_mode', { mode: 'boolean' }).notNull().default(false),
   status: text('status').notNull().default('pending'),
+  score: integer('score'),
+  issues: text('issues'),
+  summary: text('summary'),
+  startedAt: text('started_at'),
+  completedAt: text('completed_at'),
   createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
 })

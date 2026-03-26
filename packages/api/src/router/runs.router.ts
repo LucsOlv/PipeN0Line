@@ -6,6 +6,12 @@ export const runsRouter = t.router({
     return ctx.runsService.list()
   }),
 
+  get: t.procedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.runsService.get(input.id)
+    }),
+
   create: t.procedure
     .input(
       z.object({
@@ -16,6 +22,12 @@ export const runsRouter = t.router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.runsService.create(input)
+      const { id } = await ctx.runsService.create(input)
+      // fire-and-forget: execute AI analysis without blocking the response
+      ctx.runsService.execute(id, ctx.copilotService).catch((err) => {
+        console.error(`[runs] execute failed for run ${id}:`, err)
+      })
+      return { id }
     }),
 })
+

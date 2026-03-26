@@ -9,7 +9,12 @@ const mockService = {
         { sessionId: 's1', startTime: new Date(), modifiedTime: new Date(), summary: 'Test' },
     ]),
 };
-const ctx = { copilotService: mockService };
+const ctx = {
+    copilotService: mockService,
+    configService: {},
+    featureFlagsService: {},
+    runsService: {},
+};
 const t = server_1.initTRPC.context().create();
 const caller = t.createCallerFactory(ai_router_1.aiRouter)(ctx);
 (0, vitest_1.describe)('ai.router', () => {

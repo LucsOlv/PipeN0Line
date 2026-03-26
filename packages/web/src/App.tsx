@@ -6,6 +6,7 @@ import { AppShell } from './components/layout/AppShell'
 import { DashboardPage } from './pages/DashboardPage'
 import { CreateRunPage } from './pages/CreateRunPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { RunDetailPage } from './pages/RunDetailPage'
 
 const queryClient = new QueryClient()
 
@@ -19,6 +20,7 @@ const router = createBrowserRouter([
     children: [
       { path: '/', element: <DashboardPage /> },
       { path: '/run/new', element: <CreateRunPage /> },
+      { path: '/run/:id', element: <RunDetailPage /> },
       { path: '/settings', element: <SettingsPage /> },
     ],
   },
