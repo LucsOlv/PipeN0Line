@@ -14,6 +14,8 @@ const ctx = {
     configService: {},
     featureFlagsService: {},
     runsService: {},
+    nodesService: {},
+    workflowsService: {},
 };
 const t = server_1.initTRPC.context().create();
 const caller = t.createCallerFactory(ai_router_1.aiRouter)(ctx);

@@ -16,6 +16,8 @@ const ctx: TrpcContext = {
   configService: {} as never,
   featureFlagsService: {} as never,
   runsService: {} as never,
+  nodesService: {} as never,
+  workflowsService: {} as never,
 }
 
 const t = initTRPC.context<TrpcContext>().create()

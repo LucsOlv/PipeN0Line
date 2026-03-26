@@ -23,6 +23,8 @@ const start = async () => {
                 configService: server.configService,
                 featureFlagsService: server.featureFlagsService,
                 runsService: server.runsService,
+                nodesService: server.nodesService,
+                workflowsService: server.workflowsService,
             }),
         },
     });

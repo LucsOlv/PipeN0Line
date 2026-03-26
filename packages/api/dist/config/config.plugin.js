@@ -9,13 +9,19 @@ const seed_1 = require("../db/seed");
 const config_service_1 = require("./config.service");
 const feature_flags_service_1 = require("./feature-flags.service");
 const runs_service_1 = require("../runs/runs.service");
+const nodes_service_1 = require("../nodes/nodes.service");
+const workflows_service_1 = require("../workflows/workflows.service");
 async function configPlugin(server) {
     const configService = new config_service_1.ConfigService(db_1.db);
     const featureFlagsService = new feature_flags_service_1.FeatureFlagsService(db_1.db);
     const runsService = new runs_service_1.RunsService(db_1.db);
+    const nodesService = new nodes_service_1.NodesService(db_1.db);
+    const workflowsService = new workflows_service_1.WorkflowsService(db_1.db);
     server.decorate('configService', configService);
     server.decorate('featureFlagsService', featureFlagsService);
     server.decorate('runsService', runsService);
+    server.decorate('nodesService', nodesService);
+    server.decorate('workflowsService', workflowsService);
     server.addHook('onReady', async () => {
         await (0, seed_1.seedDefaults)();
     });

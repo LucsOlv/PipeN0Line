@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.pipelineRuns = exports.featureFlags = exports.appConfig = void 0;
+exports.workflowSteps = exports.workflows = exports.aiNodes = exports.pipelineRuns = exports.featureFlags = exports.appConfig = void 0;
 const sqlite_core_1 = require("drizzle-orm/sqlite-core");
 const drizzle_orm_1 = require("drizzle-orm");
 exports.appConfig = (0, sqlite_core_1.sqliteTable)('app_config', {
@@ -26,4 +26,30 @@ exports.pipelineRuns = (0, sqlite_core_1.sqliteTable)('pipeline_runs', {
     startedAt: (0, sqlite_core_1.text)('started_at'),
     completedAt: (0, sqlite_core_1.text)('completed_at'),
     createdAt: (0, sqlite_core_1.text)('created_at').notNull().default((0, drizzle_orm_1.sql) `(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+});
+exports.aiNodes = (0, sqlite_core_1.sqliteTable)('ai_nodes', {
+    id: (0, sqlite_core_1.integer)('id').primaryKey({ autoIncrement: true }),
+    name: (0, sqlite_core_1.text)('name').notNull(),
+    description: (0, sqlite_core_1.text)('description').notNull().default(''),
+    model: (0, sqlite_core_1.text)('model').notNull().default('gpt-4o'),
+    systemPrompt: (0, sqlite_core_1.text)('system_prompt').notNull(),
+    inputType: (0, sqlite_core_1.text)('input_type').notNull().default('text'),
+    outputType: (0, sqlite_core_1.text)('output_type').notNull().default('text'),
+    color: (0, sqlite_core_1.text)('color').notNull().default('#9ba8ff'),
+    icon: (0, sqlite_core_1.text)('icon').notNull().default('smart_toy'),
+    createdAt: (0, sqlite_core_1.text)('created_at').notNull().default((0, drizzle_orm_1.sql) `(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+});
+exports.workflows = (0, sqlite_core_1.sqliteTable)('workflows', {
+    id: (0, sqlite_core_1.integer)('id').primaryKey({ autoIncrement: true }),
+    name: (0, sqlite_core_1.text)('name').notNull(),
+    description: (0, sqlite_core_1.text)('description').notNull().default(''),
+    createdAt: (0, sqlite_core_1.text)('created_at').notNull().default((0, drizzle_orm_1.sql) `(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+    updatedAt: (0, sqlite_core_1.text)('updated_at').notNull().default((0, drizzle_orm_1.sql) `(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+});
+exports.workflowSteps = (0, sqlite_core_1.sqliteTable)('workflow_steps', {
+    id: (0, sqlite_core_1.integer)('id').primaryKey({ autoIncrement: true }),
+    workflowId: (0, sqlite_core_1.integer)('workflow_id').notNull(),
+    nodeId: (0, sqlite_core_1.integer)('node_id').notNull(),
+    position: (0, sqlite_core_1.integer)('position').notNull(),
+    config: (0, sqlite_core_1.text)('config'),
 });
