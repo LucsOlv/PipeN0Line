@@ -9,8 +9,9 @@ function mapRunToPipeline(run: {
   projectName: string
   branch: string
   status: string
+  workflowId: number | null
   createdAt: string
-}): Pipeline {
+}, workflowName?: string): Pipeline {
   const statusMap: Record<string, Pipeline['status']> = {
     pending: 'pending',
     running: 'running',
@@ -32,6 +33,13 @@ function mapRunToPipeline(run: {
         duration: new Date(run.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
         icon: 'account_tree',
       },
+      ...(workflowName ? [{
+        id: 'workflow',
+        name: workflowName,
+        status: run.status === 'completed' ? 'done' as const : run.status === 'running' ? 'running' as const : 'pending' as const,
+        duration: '',
+        icon: 'schema',
+      }] : []),
     ],
   }
 }
@@ -46,8 +54,10 @@ export function DashboardPage() {
       return hasActive ? 2000 : false
     },
   })
+  const { data: workflowsList } = trpc.workflows.list.useQuery()
 
-  const pipelines = runs?.map(mapRunToPipeline) ?? []
+  const workflowMap = new Map(workflowsList?.map((w) => [w.id, w.name]) ?? [])
+  const pipelines = runs?.map((r) => mapRunToPipeline(r, r.workflowId ? workflowMap.get(r.workflowId) : undefined)) ?? []
 
   return (
     <>

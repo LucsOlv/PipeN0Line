@@ -1,8 +1,8 @@
 import { readdirSync, readFileSync, statSync } from 'fs'
 import { join, relative, extname } from 'path'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, asc } from 'drizzle-orm'
 import type { Db } from '../db'
-import { pipelineRuns } from '../db/schema'
+import { pipelineRuns, runStepResults, workflowSteps, aiNodes } from '../db/schema'
 import type { CopilotService } from '../ai/service'
 
 const IGNORED_DIRS = new Set([
@@ -59,46 +59,19 @@ function collectFiles(dir: string, rootDir: string, collected: FileEntry[], byte
   }
 }
 
-function buildAnalysisPrompt(projectName: string, branch: string, files: FileEntry[]): string {
+function buildProjectContext(projectName: string, branch: string, files: FileEntry[]): string {
   const fileBlock = files
     .map((f) => `### ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
     .join('\n\n')
 
-  return `You are a senior software engineer performing a code review of the project "${projectName}" (branch: ${branch}).
-
-Analyze the codebase below and respond ONLY with a valid JSON object (no markdown, no explanation outside the JSON) in this exact format:
-{
-  "score": <integer 0-10>,
-  "issues": ["<issue 1>", "<issue 2>", ...],
-  "summary": "<brief 2-3 sentence summary of the code quality>"
-}
-
-Rules:
-- score: 0 (terrible) to 10 (excellent). Be objective.
-- issues: list the most important problems found (max 10). Be specific and actionable.
-- summary: concise overall assessment.
-
---- CODEBASE ---
-
-${fileBlock}`
-}
-
-function parseAiResponse(content: string): { score: number; issues: string[]; summary: string } {
-  const jsonMatch = content.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) throw new Error('No JSON found in AI response')
-
-  const parsed = JSON.parse(jsonMatch[0])
-  const score = Math.max(0, Math.min(10, Math.round(Number(parsed.score))))
-  const issues = Array.isArray(parsed.issues) ? parsed.issues.map(String) : []
-  const summary = String(parsed.summary ?? '')
-
-  return { score, issues, summary }
+  return `Project: "${projectName}" (branch: ${branch})\n\n--- CODEBASE ---\n\n${fileBlock}`
 }
 
 export interface CreateRunInput {
   projectName: string
   projectPath: string
   branch: string
+  workflowId: number
   debugMode: boolean
 }
 
@@ -112,6 +85,7 @@ export class RunsService {
         projectName: input.projectName,
         projectPath: input.projectPath,
         branch: input.branch,
+        workflowId: input.workflowId,
         debugMode: input.debugMode,
         status: 'pending',
         createdAt: new Date().toISOString(),
@@ -137,6 +111,33 @@ export class RunsService {
     return rows[0] ?? null
   }
 
+  async getStepResults(runId: number) {
+    return this.db
+      .select({
+        id: runStepResults.id,
+        runId: runStepResults.runId,
+        stepId: runStepResults.stepId,
+        nodeId: runStepResults.nodeId,
+        position: runStepResults.position,
+        status: runStepResults.status,
+        input: runStepResults.input,
+        output: runStepResults.output,
+        startedAt: runStepResults.startedAt,
+        completedAt: runStepResults.completedAt,
+        node: {
+          id: aiNodes.id,
+          name: aiNodes.name,
+          icon: aiNodes.icon,
+          color: aiNodes.color,
+          outputType: aiNodes.outputType,
+        },
+      })
+      .from(runStepResults)
+      .innerJoin(aiNodes, eq(runStepResults.nodeId, aiNodes.id))
+      .where(eq(runStepResults.runId, runId))
+      .orderBy(asc(runStepResults.position))
+  }
+
   async execute(id: number, copilotService: CopilotService): Promise<void> {
     const run = await this.get(id)
     if (!run) return
@@ -147,21 +148,113 @@ export class RunsService {
       .where(eq(pipelineRuns.id, id))
 
     try {
+      // Collect project files as initial context
       const files: FileEntry[] = []
       const bytesRef = { total: 0 }
       collectFiles(run.projectPath, run.projectPath, files, bytesRef)
+      const projectContext = buildProjectContext(run.projectName, run.branch, files)
 
-      const prompt = buildAnalysisPrompt(run.projectName, run.branch, files)
-      const result = await copilotService.query({ prompt })
-      const { score, issues, summary } = parseAiResponse(result.content)
+      // Fetch workflow steps with their node definitions
+      const steps = run.workflowId
+        ? await this.db
+            .select({
+              id: workflowSteps.id,
+              nodeId: workflowSteps.nodeId,
+              position: workflowSteps.position,
+              config: workflowSteps.config,
+              systemPrompt: aiNodes.systemPrompt,
+              model: aiNodes.model,
+              name: aiNodes.name,
+              outputType: aiNodes.outputType,
+            })
+            .from(workflowSteps)
+            .innerJoin(aiNodes, eq(workflowSteps.nodeId, aiNodes.id))
+            .where(eq(workflowSteps.workflowId, run.workflowId))
+            .orderBy(asc(workflowSteps.position))
+        : []
+
+      if (steps.length === 0) {
+        throw new Error('Workflow has no steps configured')
+      }
+
+      let currentInput = projectContext
+      let lastOutput = ''
+
+      for (const step of steps) {
+        // Create step result entry as "running"
+        const [stepResult] = await this.db
+          .insert(runStepResults)
+          .values({
+            runId: id,
+            stepId: step.id,
+            nodeId: step.nodeId,
+            position: step.position,
+            status: 'running',
+            input: currentInput.slice(0, 10000), // cap stored input
+            startedAt: new Date().toISOString(),
+          })
+          .returning({ id: runStepResults.id })
+
+        try {
+          const prompt = `${step.systemPrompt}\n\n--- INPUT ---\n\n${currentInput}`
+          const result = await copilotService.query({
+            prompt,
+            model: step.model || undefined,
+          })
+
+          lastOutput = result.content
+
+          await this.db
+            .update(runStepResults)
+            .set({
+              status: 'completed',
+              output: lastOutput,
+              completedAt: new Date().toISOString(),
+            })
+            .where(eq(runStepResults.id, stepResult.id))
+
+          // Output of this step becomes input for the next
+          currentInput = lastOutput
+        } catch (stepErr) {
+          const errorMsg = stepErr instanceof Error ? stepErr.message : 'Unknown step error'
+          await this.db
+            .update(runStepResults)
+            .set({
+              status: 'error',
+              output: errorMsg,
+              completedAt: new Date().toISOString(),
+            })
+            .where(eq(runStepResults.id, stepResult.id))
+
+          throw new Error(`Step "${step.name}" failed: ${errorMsg}`)
+        }
+      }
+
+      // Try to extract score from the last step output (if present)
+      let score: number | null = null
+      let issues: string[] | null = null
+      try {
+        const jsonMatch = lastOutput.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0])
+          if (typeof parsed.score === 'number') {
+            score = Math.max(0, Math.min(10, Math.round(parsed.score)))
+          }
+          if (Array.isArray(parsed.issues)) {
+            issues = parsed.issues.map(String)
+          }
+        }
+      } catch {
+        // Not JSON — that's fine, use lastOutput as summary
+      }
 
       await this.db
         .update(pipelineRuns)
         .set({
           status: 'completed',
           score,
-          issues: JSON.stringify(issues),
-          summary,
+          issues: issues ? JSON.stringify(issues) : null,
+          summary: lastOutput.slice(0, 5000),
           completedAt: new Date().toISOString(),
         })
         .where(eq(pipelineRuns.id, id))

@@ -18,6 +18,7 @@ export const pipelineRuns = sqliteTable('pipeline_runs', {
   projectName: text('project_name').notNull(),
   projectPath: text('project_path').notNull(),
   branch: text('branch').notNull(),
+  workflowId: integer('workflow_id'),
   debugMode: integer('debug_mode', { mode: 'boolean' }).notNull().default(false),
   status: text('status').notNull().default('pending'),
   score: integer('score'),
@@ -55,4 +56,17 @@ export const workflowSteps = sqliteTable('workflow_steps', {
   nodeId: integer('node_id').notNull(),
   position: integer('position').notNull(),
   config: text('config'),
+})
+
+export const runStepResults = sqliteTable('run_step_results', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  runId: integer('run_id').notNull(),
+  stepId: integer('step_id').notNull(),
+  nodeId: integer('node_id').notNull(),
+  position: integer('position').notNull(),
+  status: text('status').notNull().default('pending'),
+  input: text('input'),
+  output: text('output'),
+  startedAt: text('started_at'),
+  completedAt: text('completed_at'),
 })

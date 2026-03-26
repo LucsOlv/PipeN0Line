@@ -8,6 +8,7 @@ export function CreateRunPage() {
   const [projectPath, setProjectPath] = useState('')
   const [projectName, setProjectName] = useState('')
   const [branch, setBranch] = useState('')
+  const [workflowId, setWorkflowId] = useState<number | null>(null)
   const [debugMode, setDebugMode] = useState(true)
 
   const { data: projects, isLoading: projectsLoading } = trpc.projects.list.useQuery()
@@ -15,11 +16,17 @@ export function CreateRunPage() {
     { path: projectPath },
     { enabled: !!projectPath, retry: 0, staleTime: 30_000 }
   )
+  const { data: workflowsList } = trpc.workflows.list.useQuery()
+  const { data: selectedWorkflow } = trpc.workflows.get.useQuery(
+    { id: workflowId! },
+    { enabled: workflowId !== null }
+  )
+
   const branches = branchData?.branches ?? []
-  const isGitRepo = branchData?.isGitRepo ?? true // assume git until proven otherwise
+  const isGitRepo = branchData?.isGitRepo ?? true
 
   const createRun = trpc.runs.create.useMutation({
-    onSuccess: () => navigate('/'),
+    onSuccess: (data) => navigate(`/run/${data.id}`),
   })
 
   const handleProjectChange = (path: string) => {
@@ -31,8 +38,17 @@ export function CreateRunPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!projectPath || !branch) return
-    createRun.mutate({ projectName, projectPath, branch, debugMode })
+    if (!projectPath || !branch || !workflowId) return
+    createRun.mutate({ projectName, projectPath, branch, workflowId, debugMode })
+  }
+
+  const NODE_COLORS: Record<string, string> = {
+    blue: 'bg-primary/20 text-primary border-primary/30',
+    purple: 'bg-secondary/20 text-secondary border-secondary/30',
+    pink: 'bg-tertiary/20 text-tertiary border-tertiary/30',
+    green: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+    orange: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+    red: 'bg-red-500/20 text-red-400 border-red-500/30',
   }
 
   return (
@@ -112,14 +128,11 @@ export function CreateRunPage() {
                 Branch
               </label>
 
-              {/* Loading state */}
               {branchesLoading && projectPath ? (
                 <div className="flex items-center gap-3 bg-surface-container-low px-4 py-4 rounded-xl text-on-surface-variant text-sm">
                   <Icon name="progress_activity" className="animate-spin text-primary" size={18} />
                   <span>Lendo branches do repositório...</span>
                 </div>
-
-              /* Not a git repo */
               ) : projectPath && !isGitRepo ? (
                 <>
                   <div className="flex items-center gap-3 bg-surface-container-low border border-outline-variant/40 px-4 py-4 rounded-xl text-sm">
@@ -153,8 +166,6 @@ export function CreateRunPage() {
                     ))}
                   </div>
                 </>
-
-              /* Git repo with branches */
               ) : projectPath && branches.length > 0 ? (
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60 pointer-events-none">
@@ -174,8 +185,6 @@ export function CreateRunPage() {
                     <Icon name="expand_more" />
                   </div>
                 </div>
-
-              /* No project selected yet or fallback text input */
               ) : (
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60">
@@ -189,6 +198,74 @@ export function CreateRunPage() {
                     type="text"
                     disabled={!projectPath}
                   />
+                </div>
+              )}
+            </div>
+
+            {/* Workflow */}
+            <div className="space-y-3">
+              <label className="block text-sm font-semibold text-on-surface-variant font-label">
+                Workflow
+              </label>
+              <div className="relative group">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60 pointer-events-none">
+                  <Icon name="account_tree" className="text-lg" />
+                </span>
+                <select
+                  value={workflowId ?? ''}
+                  onChange={(e) => setWorkflowId(e.target.value ? Number(e.target.value) : null)}
+                  className="w-full bg-surface-container-low text-on-surface pl-12 pr-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest appearance-none transition-all cursor-pointer"
+                >
+                  <option value="" disabled>Selecione um workflow...</option>
+                  {workflowsList?.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} ({w.stepCount} {w.stepCount === 1 ? 'node' : 'nodes'})
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-on-surface-variant">
+                  <Icon name="expand_more" />
+                </div>
+              </div>
+              {(!workflowsList || workflowsList.length === 0) && (
+                <p className="text-xs text-on-surface-variant flex items-center gap-1">
+                  <Icon name="info" size={14} />
+                  <span>
+                    Nenhum workflow criado.{' '}
+                    <button
+                      type="button"
+                      onClick={() => navigate('/workflows')}
+                      className="text-primary underline hover:no-underline"
+                    >
+                      Crie um workflow
+                    </button>
+                  </span>
+                </p>
+              )}
+
+              {/* Workflow preview */}
+              {selectedWorkflow && selectedWorkflow.steps.length > 0 && (
+                <div className="bg-surface-container-lowest rounded-xl p-4 border border-white/5">
+                  <p className="text-[10px] text-on-surface-variant uppercase tracking-widest mb-3">
+                    Pipeline Preview
+                  </p>
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                    {selectedWorkflow.steps.map((step, i) => (
+                      <div key={step.id} className="flex items-center gap-2 flex-shrink-0">
+                        <div
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium ${
+                            NODE_COLORS[step.node.color] ?? NODE_COLORS.blue
+                          }`}
+                        >
+                          <Icon name={step.node.icon || 'smart_toy'} size={14} />
+                          <span>{step.node.name}</span>
+                        </div>
+                        {i < selectedWorkflow.steps.length - 1 && (
+                          <Icon name="arrow_forward" size={14} className="text-on-surface-variant/40" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -225,7 +302,7 @@ export function CreateRunPage() {
             <div className="flex flex-col sm:flex-row gap-4 pt-6">
               <button
                 type="submit"
-                disabled={!projectPath || !branch || createRun.isPending}
+                disabled={!projectPath || !branch || !workflowId || createRun.isPending}
                 className="flex-1 bg-gradient-to-b from-primary to-primary-dim text-on-primary font-bold py-4 px-8 rounded-xl hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {createRun.isPending

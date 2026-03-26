@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.workflowSteps = exports.workflows = exports.aiNodes = exports.pipelineRuns = exports.featureFlags = exports.appConfig = void 0;
+exports.runStepResults = exports.workflowSteps = exports.workflows = exports.aiNodes = exports.pipelineRuns = exports.featureFlags = exports.appConfig = void 0;
 const sqlite_core_1 = require("drizzle-orm/sqlite-core");
 const drizzle_orm_1 = require("drizzle-orm");
 exports.appConfig = (0, sqlite_core_1.sqliteTable)('app_config', {
@@ -18,6 +18,7 @@ exports.pipelineRuns = (0, sqlite_core_1.sqliteTable)('pipeline_runs', {
     projectName: (0, sqlite_core_1.text)('project_name').notNull(),
     projectPath: (0, sqlite_core_1.text)('project_path').notNull(),
     branch: (0, sqlite_core_1.text)('branch').notNull(),
+    workflowId: (0, sqlite_core_1.integer)('workflow_id'),
     debugMode: (0, sqlite_core_1.integer)('debug_mode', { mode: 'boolean' }).notNull().default(false),
     status: (0, sqlite_core_1.text)('status').notNull().default('pending'),
     score: (0, sqlite_core_1.integer)('score'),
@@ -52,4 +53,16 @@ exports.workflowSteps = (0, sqlite_core_1.sqliteTable)('workflow_steps', {
     nodeId: (0, sqlite_core_1.integer)('node_id').notNull(),
     position: (0, sqlite_core_1.integer)('position').notNull(),
     config: (0, sqlite_core_1.text)('config'),
+});
+exports.runStepResults = (0, sqlite_core_1.sqliteTable)('run_step_results', {
+    id: (0, sqlite_core_1.integer)('id').primaryKey({ autoIncrement: true }),
+    runId: (0, sqlite_core_1.integer)('run_id').notNull(),
+    stepId: (0, sqlite_core_1.integer)('step_id').notNull(),
+    nodeId: (0, sqlite_core_1.integer)('node_id').notNull(),
+    position: (0, sqlite_core_1.integer)('position').notNull(),
+    status: (0, sqlite_core_1.text)('status').notNull().default('pending'),
+    input: (0, sqlite_core_1.text)('input'),
+    output: (0, sqlite_core_1.text)('output'),
+    startedAt: (0, sqlite_core_1.text)('started_at'),
+    completedAt: (0, sqlite_core_1.text)('completed_at'),
 });

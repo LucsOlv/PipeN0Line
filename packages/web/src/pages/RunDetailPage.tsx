@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { trpc } from '../trpc'
 import { Icon } from '../components/ui/Icon'
@@ -14,52 +15,88 @@ function mapStatus(s: string): PipelineStatus {
   return map[s] ?? 'pending'
 }
 
-function ScoreRing({ score }: { score: number }) {
-  const color =
-    score >= 8 ? '#ffa4e4' : score >= 5 ? '#9ba8ff' : '#f2b8b5'
-  const pct = (score / 10) * 100
-  const r = 36
-  const circ = 2 * Math.PI * r
-  const dash = (pct / 100) * circ
+const NODE_COLORS: Record<string, string> = {
+  blue: 'border-primary/30 bg-primary/10',
+  purple: 'border-secondary/30 bg-secondary/10',
+  pink: 'border-tertiary/30 bg-tertiary/10',
+  green: 'border-emerald-500/30 bg-emerald-500/10',
+  orange: 'border-orange-500/30 bg-orange-500/10',
+  red: 'border-red-500/30 bg-red-500/10',
+}
 
-  return (
-    <div className="relative flex items-center justify-center w-28 h-28">
-      <svg className="absolute inset-0 -rotate-90" width="112" height="112" viewBox="0 0 112 112">
-        <circle cx="56" cy="56" r={r} fill="none" stroke="#2a2a2a" strokeWidth="8" />
-        <circle
-          cx="56" cy="56" r={r} fill="none"
-          stroke={color} strokeWidth="8"
-          strokeDasharray={`${dash} ${circ}`}
-          strokeLinecap="round"
-          style={{ transition: 'stroke-dasharray 0.8s ease' }}
-        />
-      </svg>
-      <div className="text-center z-10">
-        <span className="text-3xl font-bold font-space-grotesk" style={{ color }}>{score}</span>
-        <span className="text-on-surface-variant text-xs block">/10</span>
-      </div>
-    </div>
-  )
+const NODE_ICON_COLORS: Record<string, string> = {
+  blue: 'text-primary',
+  purple: 'text-secondary',
+  pink: 'text-tertiary',
+  green: 'text-emerald-400',
+  orange: 'text-orange-400',
+  red: 'text-red-400',
+}
+
+function StepStatusIcon({ status }: { status: string }) {
+  switch (status) {
+    case 'completed':
+      return (
+        <div className="w-6 h-6 rounded-full bg-tertiary/20 flex items-center justify-center">
+          <Icon name="check" size={14} className="text-tertiary" />
+        </div>
+      )
+    case 'running':
+      return (
+        <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
+          <Icon name="progress_activity" size={14} className="text-primary animate-spin" />
+        </div>
+      )
+    case 'error':
+      return (
+        <div className="w-6 h-6 rounded-full bg-error/20 flex items-center justify-center">
+          <Icon name="close" size={14} className="text-error" />
+        </div>
+      )
+    default:
+      return (
+        <div className="w-6 h-6 rounded-full bg-surface-container-highest flex items-center justify-center">
+          <div className="w-2 h-2 rounded-full bg-on-surface-variant/40" />
+        </div>
+      )
+  }
 }
 
 export function RunDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const runId = Number(id)
+  const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set())
+
+  const isActive = (s?: string) => s === 'pending' || s === 'running'
 
   const { data: run, isLoading } = trpc.runs.get.useQuery(
     { id: runId },
     {
       enabled: !isNaN(runId),
-      refetchInterval: (query) => {
-        const s = query.state.data?.status
-        return s === 'pending' || s === 'running' ? 2000 : false
-      },
+      refetchInterval: (query) => isActive(query.state.data?.status) ? 2000 : false,
     }
   )
 
-  const issues: string[] = run?.issues ? JSON.parse(run.issues) : []
-  const isAnalyzing = run?.status === 'pending' || run?.status === 'running'
+  const { data: stepResults } = trpc.runs.getStepResults.useQuery(
+    { runId },
+    {
+      enabled: !isNaN(runId),
+      refetchInterval: () => isActive(run?.status) ? 2000 : false,
+    }
+  )
+
+  const toggleStep = (stepId: number) => {
+    setExpandedSteps((prev) => {
+      const next = new Set(prev)
+      if (next.has(stepId)) next.delete(stepId)
+      else next.add(stepId)
+      return next
+    })
+  }
+
+  const completedSteps = stepResults?.filter((s) => s.status === 'completed').length ?? 0
+  const totalSteps = stepResults?.length ?? 0
 
   return (
     <div className="max-w-3xl mx-auto py-8 px-4">
@@ -97,18 +134,118 @@ export function RunDetailPage() {
             </p>
           </header>
 
-          {/* Analyzing state */}
-          {isAnalyzing && (
+          {/* Progress bar */}
+          {totalSteps > 0 && (
+            <div className="glass-effect rounded-xl p-5 border border-white/5 mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-bold text-on-surface-variant uppercase tracking-widest">
+                  Progresso da Pipeline
+                </p>
+                <span className="text-xs text-on-surface-variant">
+                  {completedSteps}/{totalSteps} steps
+                </span>
+              </div>
+              <div className="w-full h-2 bg-surface-container-highest rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-primary to-tertiary rounded-full transition-all duration-500"
+                  style={{ width: totalSteps > 0 ? `${(completedSteps / totalSteps) * 100}%` : '0%' }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Step-by-step results */}
+          {stepResults && stepResults.length > 0 && (
+            <div className="space-y-3 mb-6">
+              {stepResults.map((step, idx) => (
+                <div
+                  key={step.id}
+                  className={`rounded-xl border transition-all ${
+                    step.status === 'running'
+                      ? 'border-primary/30 bg-primary/5'
+                      : step.status === 'error'
+                        ? 'border-error/20 bg-error/5'
+                        : 'border-white/5 bg-surface-container-low'
+                  }`}
+                >
+                  <button
+                    onClick={() => toggleStep(step.id)}
+                    className="w-full flex items-center gap-4 p-4 text-left"
+                  >
+                    {/* Position number */}
+                    <span className="text-[10px] font-bold text-on-surface-variant w-5 text-center">
+                      {idx + 1}
+                    </span>
+
+                    {/* Step status */}
+                    <StepStatusIcon status={step.status} />
+
+                    {/* Node info */}
+                    <div
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center border ${
+                        NODE_COLORS[step.node.color] ?? NODE_COLORS.blue
+                      }`}
+                    >
+                      <Icon
+                        name={step.node.icon || 'smart_toy'}
+                        size={16}
+                        className={NODE_ICON_COLORS[step.node.color] ?? NODE_ICON_COLORS.blue}
+                      />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-on-surface truncate">{step.node.name}</p>
+                      <p className="text-[10px] text-on-surface-variant">
+                        {step.status === 'running' && 'Executando...'}
+                        {step.status === 'completed' && step.completedAt &&
+                          `Concluído em ${new Date(step.completedAt).toLocaleTimeString('pt-BR')}`}
+                        {step.status === 'error' && 'Erro na execução'}
+                        {step.status === 'pending' && 'Aguardando...'}
+                      </p>
+                    </div>
+
+                    {/* Output type badge */}
+                    <span className="text-[10px] text-on-surface-variant bg-surface-container-highest px-2 py-0.5 rounded">
+                      {step.node.outputType}
+                    </span>
+
+                    {/* Expand chevron */}
+                    {(step.output || step.status === 'error') && (
+                      <Icon
+                        name={expandedSteps.has(step.id) ? 'expand_less' : 'expand_more'}
+                        size={18}
+                        className="text-on-surface-variant"
+                      />
+                    )}
+                  </button>
+
+                  {/* Expanded output */}
+                  {expandedSteps.has(step.id) && step.output && (
+                    <div className="px-4 pb-4 pt-0">
+                      <div className="bg-surface-container-lowest rounded-lg p-4 max-h-80 overflow-auto">
+                        <pre className="text-xs text-on-surface whitespace-pre-wrap font-mono leading-relaxed">
+                          {step.output}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Analyzing state (when no steps yet) */}
+          {isActive(run.status) && (!stepResults || stepResults.length === 0) && (
             <div className="glass-effect rounded-xl p-8 border border-white/5 flex flex-col items-center gap-4 mb-8">
               <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
                 <Icon name="psychology" size={28} className="text-primary animate-pulse" />
               </div>
               <div className="text-center">
                 <p className="text-on-surface font-semibold font-space-grotesk mb-1">
-                  {run.status === 'pending' ? 'Iniciando análise…' : 'Analisando código com Copilot…'}
+                  {run.status === 'pending' ? 'Iniciando pipeline…' : 'Preparando execução…'}
                 </p>
                 <p className="text-on-surface-variant text-sm">
-                  Lendo arquivos e gerando avaliação.
+                  Lendo arquivos do projeto e carregando workflow.
                 </p>
               </div>
               <div className="flex gap-1.5">
@@ -123,15 +260,44 @@ export function RunDetailPage() {
             </div>
           )}
 
-          {/* Score + Summary */}
+          {/* Summary (completed) */}
+          {run.status === 'completed' && run.summary && (
+            <div className="glass-effect rounded-xl p-6 border border-white/5 mb-6">
+              <h2 className="text-sm font-bold text-on-surface-variant uppercase tracking-widest mb-3 flex items-center gap-2">
+                <Icon name="summarize" size={16} className="text-tertiary" />
+                Resultado Final
+              </h2>
+              <p className="text-on-surface text-sm leading-relaxed whitespace-pre-wrap">
+                {run.summary.slice(0, 2000)}
+              </p>
+            </div>
+          )}
+
+          {/* Score (if present) */}
           {run.status === 'completed' && run.score != null && (
-            <div className="glass-effect rounded-xl p-6 border border-white/5 mb-6 flex flex-col sm:flex-row items-center gap-6">
-              <ScoreRing score={run.score} />
-              <div className="flex-1">
-                <h2 className="text-sm font-bold text-on-surface-variant uppercase tracking-widest mb-2">
-                  Avaliação Geral
-                </h2>
-                <p className="text-on-surface leading-relaxed">{run.summary}</p>
+            <div className="glass-effect rounded-xl p-5 border border-white/5 mb-6 flex items-center gap-5">
+              <div className="relative flex items-center justify-center w-16 h-16">
+                <svg className="absolute inset-0 -rotate-90" width="64" height="64" viewBox="0 0 64 64">
+                  <circle cx="32" cy="32" r="24" fill="none" stroke="#2a2a2a" strokeWidth="5" />
+                  <circle
+                    cx="32" cy="32" r="24" fill="none"
+                    stroke={run.score >= 8 ? '#ffa4e4' : run.score >= 5 ? '#9ba8ff' : '#f2b8b5'}
+                    strokeWidth="5"
+                    strokeDasharray={`${(run.score / 10) * 2 * Math.PI * 24} ${2 * Math.PI * 24}`}
+                    strokeLinecap="round"
+                    style={{ transition: 'stroke-dasharray 0.8s ease' }}
+                  />
+                </svg>
+                <span
+                  className="text-xl font-bold font-space-grotesk z-10"
+                  style={{ color: run.score >= 8 ? '#ffa4e4' : run.score >= 5 ? '#9ba8ff' : '#f2b8b5' }}
+                >
+                  {run.score}
+                </span>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-on-surface">Score Global</p>
+                <p className="text-xs text-on-surface-variant">Avaliação geral de qualidade do código</p>
               </div>
             </div>
           )}
@@ -141,32 +307,9 @@ export function RunDetailPage() {
             <div className="glass-effect rounded-xl p-6 border border-error/20 mb-6 flex items-start gap-4">
               <Icon name="error" size={24} className="text-error mt-0.5 shrink-0" />
               <div>
-                <h2 className="text-sm font-bold text-error mb-1">Análise falhou</h2>
+                <h2 className="text-sm font-bold text-error mb-1">Pipeline falhou</h2>
                 <p className="text-on-surface-variant text-sm">{run.summary || 'Erro desconhecido.'}</p>
               </div>
-            </div>
-          )}
-
-          {/* Issues */}
-          {issues.length > 0 && (
-            <div className="glass-effect rounded-xl p-6 border border-white/5 mb-6">
-              <h2 className="text-sm font-bold text-on-surface-variant uppercase tracking-widest mb-4 flex items-center gap-2">
-                <Icon name="warning" size={16} className="text-secondary" />
-                Problemas encontrados
-                <span className="ml-auto text-xs font-normal bg-surface-container-high px-2 py-0.5 rounded-full">
-                  {issues.length}
-                </span>
-              </h2>
-              <ul className="space-y-3">
-                {issues.map((issue, idx) => (
-                  <li key={idx} className="flex items-start gap-3">
-                    <span className="w-5 h-5 rounded bg-secondary/10 text-secondary text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
-                      {idx + 1}
-                    </span>
-                    <span className="text-on-surface text-sm leading-relaxed">{issue}</span>
-                  </li>
-                ))}
-              </ul>
             </div>
           )}
 
