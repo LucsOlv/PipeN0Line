@@ -67,6 +67,46 @@ function buildProjectContext(projectName, branch, files) {
         .join('\n\n');
     return `Project: "${projectName}" (branch: ${branch})\n\n--- CODEBASE ---\n\n${fileBlock}`;
 }
+function parseStepConfig(config) {
+    if (!config)
+        return { bindings: {} };
+    try {
+        const parsed = JSON.parse(config);
+        return { bindings: parsed.bindings ?? {} };
+    }
+    catch {
+        return { bindings: {} };
+    }
+}
+function resolveBindings(config, taskData, stepOutputs, currentPosition, fallbackInput) {
+    const bindings = config.bindings;
+    const bindingKeys = Object.keys(bindings);
+    // No bindings configured → fallback: previous step output or project context
+    if (bindingKeys.length === 0) {
+        if (currentPosition === 0)
+            return fallbackInput;
+        const prev = stepOutputs.get(currentPosition - 1);
+        return prev ?? fallbackInput;
+    }
+    // Resolve each binding and compose input sections
+    const sections = [];
+    for (const [portKey, binding] of Object.entries(bindings)) {
+        const value = resolveBinding(binding, taskData, stepOutputs);
+        if (value) {
+            sections.push(`[${portKey}]\n${value}`);
+        }
+    }
+    return sections.length > 0 ? sections.join('\n\n') : fallbackInput;
+}
+function resolveBinding(binding, taskData, stepOutputs) {
+    if (binding.source === 'task') {
+        return taskData[binding.field] ?? null;
+    }
+    if (binding.source === 'step' && binding.stepPosition !== undefined) {
+        return stepOutputs.get(binding.stepPosition) ?? null;
+    }
+    return null;
+}
 class RunsService {
     db;
     constructor(db) {
@@ -120,6 +160,7 @@ class RunsService {
                 icon: schema_1.aiNodes.icon,
                 color: schema_1.aiNodes.color,
                 outputType: schema_1.aiNodes.outputType,
+                outputPorts: schema_1.aiNodes.outputPorts,
             },
         })
             .from(schema_1.runStepResults)
@@ -141,6 +182,13 @@ class RunsService {
             const bytesRef = { total: 0 };
             collectFiles(run.projectPath, run.projectPath, files, bytesRef);
             const projectContext = buildProjectContext(run.projectName, run.branch, files);
+            // Task data available for bindings
+            const taskData = {
+                files: projectContext,
+                project_name: run.projectName,
+                branch: run.branch,
+                project_path: run.projectPath,
+            };
             // Fetch workflow steps with their node definitions
             const steps = run.workflowId
                 ? await this.db
@@ -162,10 +210,13 @@ class RunsService {
             if (steps.length === 0) {
                 throw new Error('Workflow has no steps configured');
             }
-            let currentInput = projectContext;
+            // Store outputs by step position for binding resolution
+            const stepOutputs = new Map();
             let lastOutput = '';
             for (const step of steps) {
-                // Create step result entry as "running"
+                // Resolve input from bindings or fallback to previous output / project context
+                const stepConfig = parseStepConfig(step.config);
+                const resolvedInput = resolveBindings(stepConfig, taskData, stepOutputs, step.position, projectContext);
                 const [stepResult] = await this.db
                     .insert(schema_1.runStepResults)
                     .values({
@@ -174,17 +225,18 @@ class RunsService {
                     nodeId: step.nodeId,
                     position: step.position,
                     status: 'running',
-                    input: currentInput.slice(0, 10000), // cap stored input
+                    input: resolvedInput.slice(0, 10000),
                     startedAt: new Date().toISOString(),
                 })
                     .returning({ id: schema_1.runStepResults.id });
                 try {
-                    const prompt = `${step.systemPrompt}\n\n--- INPUT ---\n\n${currentInput}`;
+                    const prompt = `${step.systemPrompt}\n\n--- INPUT ---\n\n${resolvedInput}`;
                     const result = await copilotService.query({
                         prompt,
                         model: step.model || undefined,
                     });
                     lastOutput = result.content;
+                    stepOutputs.set(step.position, lastOutput);
                     await this.db
                         .update(schema_1.runStepResults)
                         .set({
@@ -193,8 +245,6 @@ class RunsService {
                         completedAt: new Date().toISOString(),
                     })
                         .where((0, drizzle_orm_1.eq)(schema_1.runStepResults.id, stepResult.id));
-                    // Output of this step becomes input for the next
-                    currentInput = lastOutput;
                 }
                 catch (stepErr) {
                     const errorMsg = stepErr instanceof Error ? stepErr.message : 'Unknown step error';

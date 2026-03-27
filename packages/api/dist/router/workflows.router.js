@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.workflowsRouter = void 0;
 const zod_1 = require("zod");
 const trpc_1 = require("./trpc");
+const io_ports_1 = require("../types/io-ports");
 exports.workflowsRouter = trpc_1.t.router({
     list: trpc_1.t.procedure.query(async ({ ctx }) => {
         return ctx.workflowsService.list();
@@ -59,5 +60,15 @@ exports.workflowsRouter = trpc_1.t.router({
         .mutation(async ({ ctx, input }) => {
         await ctx.workflowsService.reorderSteps(input.workflowId, input.stepIds);
         return { ok: true };
+    }),
+    updateStepConfig: trpc_1.t.procedure
+        .input(zod_1.z.object({
+        stepId: zod_1.z.number(),
+        config: zod_1.z.object({
+            bindings: zod_1.z.record(zod_1.z.string(), io_ports_1.bindingSchema).default({}),
+        }),
+    }))
+        .mutation(async ({ ctx, input }) => {
+        return ctx.workflowsService.updateStepConfig(input.stepId, input.config);
     }),
 });

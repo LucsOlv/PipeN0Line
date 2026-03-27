@@ -4,6 +4,7 @@ import { eq, desc, asc } from 'drizzle-orm'
 import type { Db } from '../db'
 import { pipelineRuns, runStepResults, workflowSteps, aiNodes } from '../db/schema'
 import type { CopilotService } from '../ai/service'
+import type { StepConfig, Binding } from '../types/io-ports'
 
 const IGNORED_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '.next', '.nuxt',
@@ -75,6 +76,59 @@ export interface CreateRunInput {
   debugMode: boolean
 }
 
+function parseStepConfig(config: string | null): StepConfig {
+  if (!config) return { bindings: {} }
+  try {
+    const parsed = JSON.parse(config)
+    return { bindings: parsed.bindings ?? {} }
+  } catch {
+    return { bindings: {} }
+  }
+}
+
+function resolveBindings(
+  config: StepConfig,
+  taskData: Record<string, string>,
+  stepOutputs: Map<number, string>,
+  currentPosition: number,
+  fallbackInput: string,
+): string {
+  const bindings = config.bindings
+  const bindingKeys = Object.keys(bindings)
+
+  // No bindings configured → fallback: previous step output or project context
+  if (bindingKeys.length === 0) {
+    if (currentPosition === 0) return fallbackInput
+    const prev = stepOutputs.get(currentPosition - 1)
+    return prev ?? fallbackInput
+  }
+
+  // Resolve each binding and compose input sections
+  const sections: string[] = []
+  for (const [portKey, binding] of Object.entries(bindings)) {
+    const value = resolveBinding(binding, taskData, stepOutputs)
+    if (value) {
+      sections.push(`[${portKey}]\n${value}`)
+    }
+  }
+
+  return sections.length > 0 ? sections.join('\n\n') : fallbackInput
+}
+
+function resolveBinding(
+  binding: Binding,
+  taskData: Record<string, string>,
+  stepOutputs: Map<number, string>,
+): string | null {
+  if (binding.source === 'task') {
+    return taskData[binding.field] ?? null
+  }
+  if (binding.source === 'step' && binding.stepPosition !== undefined) {
+    return stepOutputs.get(binding.stepPosition) ?? null
+  }
+  return null
+}
+
 export class RunsService {
   constructor(private readonly db: Db) {}
 
@@ -130,6 +184,7 @@ export class RunsService {
           icon: aiNodes.icon,
           color: aiNodes.color,
           outputType: aiNodes.outputType,
+          outputPorts: aiNodes.outputPorts,
         },
       })
       .from(runStepResults)
@@ -154,6 +209,14 @@ export class RunsService {
       collectFiles(run.projectPath, run.projectPath, files, bytesRef)
       const projectContext = buildProjectContext(run.projectName, run.branch, files)
 
+      // Task data available for bindings
+      const taskData: Record<string, string> = {
+        files: projectContext,
+        project_name: run.projectName,
+        branch: run.branch,
+        project_path: run.projectPath,
+      }
+
       // Fetch workflow steps with their node definitions
       const steps = run.workflowId
         ? await this.db
@@ -177,11 +240,15 @@ export class RunsService {
         throw new Error('Workflow has no steps configured')
       }
 
-      let currentInput = projectContext
+      // Store outputs by step position for binding resolution
+      const stepOutputs: Map<number, string> = new Map()
       let lastOutput = ''
 
       for (const step of steps) {
-        // Create step result entry as "running"
+        // Resolve input from bindings or fallback to previous output / project context
+        const stepConfig = parseStepConfig(step.config)
+        const resolvedInput = resolveBindings(stepConfig, taskData, stepOutputs, step.position, projectContext)
+
         const [stepResult] = await this.db
           .insert(runStepResults)
           .values({
@@ -190,19 +257,20 @@ export class RunsService {
             nodeId: step.nodeId,
             position: step.position,
             status: 'running',
-            input: currentInput.slice(0, 10000), // cap stored input
+            input: resolvedInput.slice(0, 10000),
             startedAt: new Date().toISOString(),
           })
           .returning({ id: runStepResults.id })
 
         try {
-          const prompt = `${step.systemPrompt}\n\n--- INPUT ---\n\n${currentInput}`
+          const prompt = `${step.systemPrompt}\n\n--- INPUT ---\n\n${resolvedInput}`
           const result = await copilotService.query({
             prompt,
             model: step.model || undefined,
           })
 
           lastOutput = result.content
+          stepOutputs.set(step.position, lastOutput)
 
           await this.db
             .update(runStepResults)
@@ -212,9 +280,6 @@ export class RunsService {
               completedAt: new Date().toISOString(),
             })
             .where(eq(runStepResults.id, stepResult.id))
-
-          // Output of this step becomes input for the next
-          currentInput = lastOutput
         } catch (stepErr) {
           const errorMsg = stepErr instanceof Error ? stepErr.message : 'Unknown step error'
           await this.db

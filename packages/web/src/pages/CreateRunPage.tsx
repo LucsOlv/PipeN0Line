@@ -252,13 +252,30 @@ export function CreateRunPage() {
                   <div className="flex items-center gap-2 overflow-x-auto pb-1">
                     {selectedWorkflow.steps.map((step, i) => (
                       <div key={step.id} className="flex items-center gap-2 flex-shrink-0">
-                        <div
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium ${
-                            NODE_COLORS[step.node.color] ?? NODE_COLORS.blue
-                          }`}
-                        >
-                          <Icon name={step.node.icon || 'smart_toy'} size={14} />
-                          <span>{step.node.name}</span>
+                        <div className="flex flex-col items-center gap-1">
+                          <div
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium ${
+                              NODE_COLORS[step.node.color] ?? NODE_COLORS.blue
+                            }`}
+                          >
+                            <Icon name={step.node.icon || 'smart_toy'} size={14} />
+                            <span>{step.node.name}</span>
+                          </div>
+                          {step.node.inputPorts && (
+                            <div className="flex gap-0.5">
+                              {(step.node.inputPorts as { type: string }[]).slice(0, 3).map((p, j) => (
+                                <span key={j} className="text-[7px] px-1 rounded bg-surface-container-high text-on-surface-variant">
+                                  {p.type}
+                                </span>
+                              ))}
+                              <span className="text-[7px] text-on-surface-variant/50">→</span>
+                              {(step.node.outputPorts as { type: string }[])?.slice(0, 3).map((p, j) => (
+                                <span key={j} className="text-[7px] px-1 rounded bg-surface-container-high text-on-surface-variant">
+                                  {p.type}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         {i < selectedWorkflow.steps.length - 1 && (
                           <Icon name="arrow_forward" size={14} className="text-on-surface-variant/40" />

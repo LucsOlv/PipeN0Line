@@ -1,6 +1,17 @@
 import { eq, desc, asc } from 'drizzle-orm'
 import type { Db } from '../db'
 import { workflows, workflowSteps, aiNodes } from '../db/schema'
+import { DEFAULT_INPUT_PORTS, DEFAULT_OUTPUT_PORTS, type IOPort } from '../types/io-ports'
+
+function parsePortsJson(json: string | null | undefined, fallback: IOPort[]): IOPort[] {
+  if (!json || json === '[]') return fallback
+  try {
+    const parsed = JSON.parse(json)
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : fallback
+  } catch {
+    return fallback
+  }
+}
 
 export interface CreateWorkflowInput {
   name: string
@@ -45,6 +56,8 @@ export class WorkflowsService {
           systemPrompt: aiNodes.systemPrompt,
           inputType: aiNodes.inputType,
           outputType: aiNodes.outputType,
+          inputPorts: aiNodes.inputPorts,
+          outputPorts: aiNodes.outputPorts,
           color: aiNodes.color,
           icon: aiNodes.icon,
         },
@@ -54,7 +67,17 @@ export class WorkflowsService {
       .where(eq(workflowSteps.workflowId, id))
       .orderBy(asc(workflowSteps.position))
 
-    return { ...workflow, steps }
+    const enrichedSteps = steps.map((s) => ({
+      ...s,
+      config: s.config ? JSON.parse(s.config) : null,
+      node: {
+        ...s.node,
+        inputPorts: parsePortsJson(s.node.inputPorts, DEFAULT_INPUT_PORTS),
+        outputPorts: parsePortsJson(s.node.outputPorts, DEFAULT_OUTPUT_PORTS),
+      },
+    }))
+
+    return { ...workflow, steps: enrichedSteps }
   }
 
   async create(input: CreateWorkflowInput) {
@@ -158,5 +181,23 @@ export class WorkflowsService {
       .update(workflows)
       .set({ updatedAt: new Date().toISOString() })
       .where(eq(workflows.id, workflowId))
+  }
+
+  async updateStepConfig(stepId: number, config: Record<string, unknown>) {
+    const rows = await this.db.select().from(workflowSteps).where(eq(workflowSteps.id, stepId)).limit(1)
+    const step = rows[0]
+    if (!step) return null
+
+    await this.db
+      .update(workflowSteps)
+      .set({ config: JSON.stringify(config) })
+      .where(eq(workflowSteps.id, stepId))
+
+    await this.db
+      .update(workflows)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(workflows.id, step.workflowId))
+
+    return this.get(step.workflowId)
   }
 }

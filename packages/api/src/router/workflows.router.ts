@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { t } from './trpc'
+import { bindingSchema } from '../types/io-ports'
 
 export const workflowsRouter = t.router({
   list: t.procedure.query(async ({ ctx }) => {
@@ -72,5 +73,18 @@ export const workflowsRouter = t.router({
     .mutation(async ({ ctx, input }) => {
       await ctx.workflowsService.reorderSteps(input.workflowId, input.stepIds)
       return { ok: true }
+    }),
+
+  updateStepConfig: t.procedure
+    .input(
+      z.object({
+        stepId: z.number(),
+        config: z.object({
+          bindings: z.record(z.string(), bindingSchema).default({}),
+        }),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.workflowsService.updateStepConfig(input.stepId, input.config)
     }),
 })

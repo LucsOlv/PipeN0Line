@@ -1,6 +1,7 @@
 import { eq, desc } from 'drizzle-orm'
 import type { Db } from '../db'
 import { aiNodes } from '../db/schema'
+import { DEFAULT_INPUT_PORTS, DEFAULT_OUTPUT_PORTS, type IOPort } from '../types/io-ports'
 
 export interface CreateNodeInput {
   name: string
@@ -9,6 +10,8 @@ export interface CreateNodeInput {
   systemPrompt: string
   inputType?: string
   outputType?: string
+  inputPorts?: IOPort[]
+  outputPorts?: IOPort[]
   color?: string
   icon?: string
 }
@@ -20,23 +23,50 @@ export interface UpdateNodeInput {
   systemPrompt?: string
   inputType?: string
   outputType?: string
+  inputPorts?: IOPort[]
+  outputPorts?: IOPort[]
   color?: string
   icon?: string
+}
+
+function parsePortsJson(json: string | null | undefined, fallback: IOPort[]): IOPort[] {
+  if (!json || json === '[]') return fallback
+  try {
+    const parsed = JSON.parse(json)
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : fallback
+  } catch {
+    return fallback
+  }
+}
+
+type NodeRow = typeof aiNodes.$inferSelect
+
+function enrichNode(row: NodeRow) {
+  return {
+    ...row,
+    inputPorts: parsePortsJson(row.inputPorts, DEFAULT_INPUT_PORTS),
+    outputPorts: parsePortsJson(row.outputPorts, DEFAULT_OUTPUT_PORTS),
+  }
 }
 
 export class NodesService {
   constructor(private readonly db: Db) {}
 
   async list() {
-    return this.db.select().from(aiNodes).orderBy(desc(aiNodes.createdAt))
+    const rows = await this.db.select().from(aiNodes).orderBy(desc(aiNodes.createdAt))
+    return rows.map(enrichNode)
   }
 
   async get(id: number) {
     const rows = await this.db.select().from(aiNodes).where(eq(aiNodes.id, id)).limit(1)
-    return rows[0] ?? null
+    if (!rows[0]) return null
+    return enrichNode(rows[0])
   }
 
   async create(input: CreateNodeInput) {
+    const inputPorts = input.inputPorts ?? DEFAULT_INPUT_PORTS
+    const outputPorts = input.outputPorts ?? DEFAULT_OUTPUT_PORTS
+
     const result = await this.db
       .insert(aiNodes)
       .values({
@@ -46,11 +76,13 @@ export class NodesService {
         systemPrompt: input.systemPrompt,
         inputType: input.inputType ?? 'text',
         outputType: input.outputType ?? 'text',
+        inputPorts: JSON.stringify(inputPorts),
+        outputPorts: JSON.stringify(outputPorts),
         color: input.color ?? '#9ba8ff',
         icon: input.icon ?? 'smart_toy',
       })
       .returning()
-    return result[0]
+    return enrichNode(result[0])
   }
 
   async update(id: number, input: UpdateNodeInput) {
@@ -61,6 +93,8 @@ export class NodesService {
     if (input.systemPrompt !== undefined) sets.systemPrompt = input.systemPrompt
     if (input.inputType !== undefined) sets.inputType = input.inputType
     if (input.outputType !== undefined) sets.outputType = input.outputType
+    if (input.inputPorts !== undefined) sets.inputPorts = JSON.stringify(input.inputPorts)
+    if (input.outputPorts !== undefined) sets.outputPorts = JSON.stringify(input.outputPorts)
     if (input.color !== undefined) sets.color = input.color
     if (input.icon !== undefined) sets.icon = input.icon
 

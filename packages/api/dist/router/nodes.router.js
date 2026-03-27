@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.nodesRouter = void 0;
 const zod_1 = require("zod");
 const trpc_1 = require("./trpc");
+const io_ports_1 = require("../types/io-ports");
 exports.nodesRouter = trpc_1.t.router({
     list: trpc_1.t.procedure.query(async ({ ctx }) => {
         return ctx.nodesService.list();
@@ -18,8 +19,10 @@ exports.nodesRouter = trpc_1.t.router({
         description: zod_1.z.string().optional(),
         model: zod_1.z.string().optional(),
         systemPrompt: zod_1.z.string().min(1),
-        inputType: zod_1.z.enum(['text', 'json', 'code']).optional(),
-        outputType: zod_1.z.enum(['text', 'json', 'code', 'score']).optional(),
+        inputType: zod_1.z.string().optional(),
+        outputType: zod_1.z.string().optional(),
+        inputPorts: zod_1.z.array(io_ports_1.ioPortSchema).min(1).optional(),
+        outputPorts: zod_1.z.array(io_ports_1.ioPortSchema).min(1).optional(),
         color: zod_1.z.string().optional(),
         icon: zod_1.z.string().optional(),
     }))
@@ -33,8 +36,10 @@ exports.nodesRouter = trpc_1.t.router({
         description: zod_1.z.string().optional(),
         model: zod_1.z.string().optional(),
         systemPrompt: zod_1.z.string().min(1).optional(),
-        inputType: zod_1.z.enum(['text', 'json', 'code']).optional(),
-        outputType: zod_1.z.enum(['text', 'json', 'code', 'score']).optional(),
+        inputType: zod_1.z.string().optional(),
+        outputType: zod_1.z.string().optional(),
+        inputPorts: zod_1.z.array(io_ports_1.ioPortSchema).min(1).optional(),
+        outputPorts: zod_1.z.array(io_ports_1.ioPortSchema).min(1).optional(),
         color: zod_1.z.string().optional(),
         icon: zod_1.z.string().optional(),
     }))

@@ -37,6 +37,8 @@ export const aiNodes = sqliteTable('ai_nodes', {
   systemPrompt: text('system_prompt').notNull(),
   inputType: text('input_type').notNull().default('text'),
   outputType: text('output_type').notNull().default('text'),
+  inputPorts: text('input_ports').notNull().default('[]'),
+  outputPorts: text('output_ports').notNull().default('[]'),
   color: text('color').notNull().default('#9ba8ff'),
   icon: text('icon').notNull().default('smart_toy'),
   createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),

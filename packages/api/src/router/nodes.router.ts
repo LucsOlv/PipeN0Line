@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { t } from './trpc'
+import { ioPortSchema } from '../types/io-ports'
 
 export const nodesRouter = t.router({
   list: t.procedure.query(async ({ ctx }) => {
@@ -19,8 +20,10 @@ export const nodesRouter = t.router({
         description: z.string().optional(),
         model: z.string().optional(),
         systemPrompt: z.string().min(1),
-        inputType: z.enum(['text', 'json', 'code']).optional(),
-        outputType: z.enum(['text', 'json', 'code', 'score']).optional(),
+        inputType: z.string().optional(),
+        outputType: z.string().optional(),
+        inputPorts: z.array(ioPortSchema).min(1).optional(),
+        outputPorts: z.array(ioPortSchema).min(1).optional(),
         color: z.string().optional(),
         icon: z.string().optional(),
       })
@@ -37,8 +40,10 @@ export const nodesRouter = t.router({
         description: z.string().optional(),
         model: z.string().optional(),
         systemPrompt: z.string().min(1).optional(),
-        inputType: z.enum(['text', 'json', 'code']).optional(),
-        outputType: z.enum(['text', 'json', 'code', 'score']).optional(),
+        inputType: z.string().optional(),
+        outputType: z.string().optional(),
+        inputPorts: z.array(ioPortSchema).min(1).optional(),
+        outputPorts: z.array(ioPortSchema).min(1).optional(),
         color: z.string().optional(),
         icon: z.string().optional(),
       })

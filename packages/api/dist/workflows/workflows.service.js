@@ -3,6 +3,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.WorkflowsService = void 0;
 const drizzle_orm_1 = require("drizzle-orm");
 const schema_1 = require("../db/schema");
+const io_ports_1 = require("../types/io-ports");
+function parsePortsJson(json, fallback) {
+    if (!json || json === '[]')
+        return fallback;
+    try {
+        const parsed = JSON.parse(json);
+        return Array.isArray(parsed) && parsed.length > 0 ? parsed : fallback;
+    }
+    catch {
+        return fallback;
+    }
+}
 class WorkflowsService {
     db;
     constructor(db) {
@@ -36,6 +48,8 @@ class WorkflowsService {
                 systemPrompt: schema_1.aiNodes.systemPrompt,
                 inputType: schema_1.aiNodes.inputType,
                 outputType: schema_1.aiNodes.outputType,
+                inputPorts: schema_1.aiNodes.inputPorts,
+                outputPorts: schema_1.aiNodes.outputPorts,
                 color: schema_1.aiNodes.color,
                 icon: schema_1.aiNodes.icon,
             },
@@ -44,7 +58,16 @@ class WorkflowsService {
             .innerJoin(schema_1.aiNodes, (0, drizzle_orm_1.eq)(schema_1.workflowSteps.nodeId, schema_1.aiNodes.id))
             .where((0, drizzle_orm_1.eq)(schema_1.workflowSteps.workflowId, id))
             .orderBy((0, drizzle_orm_1.asc)(schema_1.workflowSteps.position));
-        return { ...workflow, steps };
+        const enrichedSteps = steps.map((s) => ({
+            ...s,
+            config: s.config ? JSON.parse(s.config) : null,
+            node: {
+                ...s.node,
+                inputPorts: parsePortsJson(s.node.inputPorts, io_ports_1.DEFAULT_INPUT_PORTS),
+                outputPorts: parsePortsJson(s.node.outputPorts, io_ports_1.DEFAULT_OUTPUT_PORTS),
+            },
+        }));
+        return { ...workflow, steps: enrichedSteps };
     }
     async create(input) {
         const now = new Date().toISOString();
@@ -134,6 +157,21 @@ class WorkflowsService {
             .update(schema_1.workflows)
             .set({ updatedAt: new Date().toISOString() })
             .where((0, drizzle_orm_1.eq)(schema_1.workflows.id, workflowId));
+    }
+    async updateStepConfig(stepId, config) {
+        const rows = await this.db.select().from(schema_1.workflowSteps).where((0, drizzle_orm_1.eq)(schema_1.workflowSteps.id, stepId)).limit(1);
+        const step = rows[0];
+        if (!step)
+            return null;
+        await this.db
+            .update(schema_1.workflowSteps)
+            .set({ config: JSON.stringify(config) })
+            .where((0, drizzle_orm_1.eq)(schema_1.workflowSteps.id, stepId));
+        await this.db
+            .update(schema_1.workflows)
+            .set({ updatedAt: new Date().toISOString() })
+            .where((0, drizzle_orm_1.eq)(schema_1.workflows.id, step.workflowId));
+        return this.get(step.workflowId);
     }
 }
 exports.WorkflowsService = WorkflowsService;

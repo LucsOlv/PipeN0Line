@@ -36,6 +36,8 @@ exports.aiNodes = (0, sqlite_core_1.sqliteTable)('ai_nodes', {
     systemPrompt: (0, sqlite_core_1.text)('system_prompt').notNull(),
     inputType: (0, sqlite_core_1.text)('input_type').notNull().default('text'),
     outputType: (0, sqlite_core_1.text)('output_type').notNull().default('text'),
+    inputPorts: (0, sqlite_core_1.text)('input_ports').notNull().default('[]'),
+    outputPorts: (0, sqlite_core_1.text)('output_ports').notNull().default('[]'),
     color: (0, sqlite_core_1.text)('color').notNull().default('#9ba8ff'),
     icon: (0, sqlite_core_1.text)('icon').notNull().default('smart_toy'),
     createdAt: (0, sqlite_core_1.text)('created_at').notNull().default((0, drizzle_orm_1.sql) `(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),

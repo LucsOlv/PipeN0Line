@@ -204,10 +204,26 @@ export function RunDetailPage() {
                       </p>
                     </div>
 
-                    {/* Output type badge */}
-                    <span className="text-[10px] text-on-surface-variant bg-surface-container-highest px-2 py-0.5 rounded">
-                      {step.node.outputType}
-                    </span>
+                    {/* Output ports badges */}
+                    <div className="flex gap-1">
+                      {(() => {
+                        try {
+                          const ports = JSON.parse(step.node.outputPorts || '[]') as { key: string; type: string }[]
+                          if (ports.length > 0) {
+                            return ports.slice(0, 2).map((p) => (
+                              <span key={p.key} className="text-[9px] text-on-surface-variant bg-surface-container-highest px-1.5 py-0.5 rounded">
+                                {p.type}
+                              </span>
+                            ))
+                          }
+                        } catch {}
+                        return (
+                          <span className="text-[10px] text-on-surface-variant bg-surface-container-highest px-2 py-0.5 rounded">
+                            {step.node.outputType}
+                          </span>
+                        )
+                      })()}
+                    </div>
 
                     {/* Expand chevron */}
                     {(step.output || step.status === 'error') && (
