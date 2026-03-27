@@ -123,29 +123,22 @@ function PortDot({
       data-port-id={portId}
       style={{ width: size, height: size }}
     >
-      {/* Pulse ring for valid drop targets */}
-      {isTarget && (
-        <div
-          className="absolute inset-[-4px] rounded-full animate-ping"
-          style={{ backgroundColor: color + '30' }}
-        />
-      )}
-      {/* Glow ring on hover */}
+      {/* Glow ring on hover / valid target */}
       <div
-        className={`absolute inset-[-3px] rounded-full transition-opacity duration-200 ${
-          isTarget ? 'opacity-100' : 'opacity-0 group-hover/port:opacity-100'
+        className={`absolute inset-[-3px] rounded-full transition-all duration-300 ${
+          isTarget ? 'opacity-100 scale-125' : 'opacity-0 group-hover/port:opacity-60'
         }`}
-        style={{ backgroundColor: color + '15' }}
+        style={{ backgroundColor: color + '20' }}
       />
       {/* Main dot */}
       <div
         className={`w-full h-full rounded-full border-2 transition-all duration-200 ${
-          isTarget ? 'scale-150' : 'group-hover/port:scale-125'
+          isTarget ? 'scale-[1.4]' : 'group-hover/port:scale-110'
         }`}
         style={{
           borderColor: color,
-          backgroundColor: connected ? color + '90' : isTarget ? color + '60' : color + '20',
-          boxShadow: connected || isTarget ? `0 0 8px ${color}50` : 'none',
+          backgroundColor: connected ? color + '80' : isTarget ? color + '50' : color + '15',
+          boxShadow: connected ? `0 0 6px ${color}40` : 'none',
         }}
       />
     </div>
@@ -162,8 +155,8 @@ function TaskNode({
 }) {
   return (
     <div className="relative glass-effect rounded-xl p-4 border-2 border-emerald-500/30 min-w-[190px] shrink-0 animate-[fadeSlideIn_0.4s_ease-out] group/task hover:border-emerald-500/50 transition-all duration-300">
-      {/* Glow */}
-      <div className="absolute inset-0 rounded-xl bg-emerald-500/5 opacity-0 group-hover/task:opacity-100 transition-opacity duration-300 -z-10 blur-xl" />
+      {/* Subtle glow on hover */}
+      <div className="absolute inset-0 rounded-xl bg-emerald-500/[0.03] opacity-0 group-hover/task:opacity-100 transition-opacity duration-300 -z-10" />
 
       <div className="absolute -top-2.5 -left-2.5 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold text-white bg-emerald-500 shadow-lg shadow-emerald-500/20">
         T
@@ -240,10 +233,10 @@ function StepNode({
         animationDelay: `${index * 80}ms`,
       }}
     >
-      {/* Glow on hover */}
+      {/* Subtle glow on hover */}
       <div
-        className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10 blur-2xl"
-        style={{ backgroundColor: node.color + '12' }}
+        className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10"
+        style={{ backgroundColor: node.color + '08' }}
       />
 
       {/* Position badge */}
@@ -379,34 +372,13 @@ function StepNode({
   )
 }
 
-// --- Animated Connector Arrow ---
+// --- Connector Arrow (between sequential nodes) ---
 function Connector({ index = 0 }: { index?: number }) {
   return (
-    <div className="shrink-0 mx-1 flex items-center" style={{ animationDelay: `${index * 80 + 40}ms` }}>
-      <svg width="56" height="28" viewBox="0 0 56 28" className="overflow-visible">
-        <defs>
-          <linearGradient id={`connGrad-${index}`} x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="#9ba8ff" stopOpacity="0.4" />
-            <stop offset="50%" stopColor="#9891fe" stopOpacity="0.5" />
-            <stop offset="100%" stopColor="#ffa4e4" stopOpacity="0.4" />
-          </linearGradient>
-        </defs>
-        {/* Track line */}
-        <line x1="4" y1="14" x2="40" y2="14" stroke="white" strokeWidth="1" strokeOpacity="0.04" />
-        {/* Animated flow line */}
-        <line
-          x1="4" y1="14" x2="40" y2="14"
-          stroke={`url(#connGrad-${index})`}
-          strokeWidth="2"
-          strokeDasharray="6 4"
-          strokeLinecap="round"
-        >
-          <animate attributeName="stroke-dashoffset" values="0;-20" dur="1.5s" repeatCount="indefinite" />
-        </line>
-        {/* Arrow */}
-        <polygon points="40,8 52,14 40,20" fill="#ffa4e4" opacity="0.5">
-          <animate attributeName="opacity" values="0.3;0.6;0.3" dur="1.5s" repeatCount="indefinite" />
-        </polygon>
+    <div className="shrink-0 mx-0.5 flex items-center" style={{ animationDelay: `${index * 80 + 40}ms` }}>
+      <svg width="40" height="20" viewBox="0 0 40 20" className="overflow-visible">
+        <line x1="2" y1="10" x2="30" y2="10" stroke="#9ba8ff" strokeWidth="1.5" strokeOpacity="0.2" strokeLinecap="round" />
+        <polyline points="28,6 34,10 28,14" fill="none" stroke="#9ba8ff" strokeWidth="1.5" strokeOpacity="0.3" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     </div>
   )
@@ -460,9 +432,10 @@ function NodeToolboxItem({
 // --- Connection Lines SVG overlay ---
 function ConnectionLines({ steps, renderKey }: { steps: WorkflowStep[]; renderKey: number }) {
   const [lines, setLines] = useState<{ fromPort: string; toPort: string; color: string; key: string }[]>([])
+  const [, forceUpdate] = useState(0)
 
+  // Compute line data from step bindings
   useEffect(() => {
-    // Small delay to let DOM settle after mutations
     const timer = setTimeout(() => {
       const newLines: typeof lines = []
       for (const step of steps) {
@@ -489,6 +462,21 @@ function ConnectionLines({ steps, renderKey }: { steps: WorkflowStep[]; renderKe
     return () => clearTimeout(timer)
   }, [steps, renderKey])
 
+  // Re-render on scroll/resize so lines track the ports
+  useEffect(() => {
+    const container = document.querySelector('.canvas-container')
+    if (!container) return
+    const scrollParent = container.querySelector('.overflow-x-auto') ?? container
+
+    const update = () => forceUpdate((n) => n + 1)
+    scrollParent.addEventListener('scroll', update, { passive: true })
+    window.addEventListener('resize', update)
+    return () => {
+      scrollParent.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [])
+
   if (lines.length === 0) return null
 
   return (
@@ -496,8 +484,8 @@ function ConnectionLines({ steps, renderKey }: { steps: WorkflowStep[]; renderKe
       <defs>
         {lines.map((line) => (
           <linearGradient key={`grad-${line.key}`} id={`conn-grad-${line.key}`} x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor={line.color} stopOpacity="0.6" />
-            <stop offset="100%" stopColor={line.color} stopOpacity="0.3" />
+            <stop offset="0%" stopColor={line.color} stopOpacity="0.5" />
+            <stop offset="100%" stopColor={line.color} stopOpacity="0.2" />
           </linearGradient>
         ))}
       </defs>
@@ -513,41 +501,32 @@ function ConnectionLines({ steps, renderKey }: { steps: WorkflowStep[]; renderKe
         const fromRect = fromEl.getBoundingClientRect()
         const toRect = toEl.getBoundingClientRect()
 
-        const x1 = fromRect.left + fromRect.width / 2 - containerRect.left
-        const y1 = fromRect.top + fromRect.height / 2 - containerRect.top
-        const x2 = toRect.left + toRect.width / 2 - containerRect.left
-        const y2 = toRect.top + toRect.height / 2 - containerRect.top
+        const x1 = fromRect.left + fromRect.width / 2 - containerRect.left + container.scrollLeft
+        const y1 = fromRect.top + fromRect.height / 2 - containerRect.top + container.scrollTop
+        const x2 = toRect.left + toRect.width / 2 - containerRect.left + container.scrollLeft
+        const y2 = toRect.top + toRect.height / 2 - containerRect.top + container.scrollTop
 
         const dx = Math.abs(x2 - x1)
-        const cpx = Math.max(dx * 0.4, 40)
+        const dy = Math.abs(y2 - y1)
+        const cpx = Math.max(dx * 0.35, 30)
+        const cpy = dy * 0.1
+
+        const path = `M ${x1} ${y1} C ${x1 + cpx} ${y1 + cpy}, ${x2 - cpx} ${y2 - cpy}, ${x2} ${y2}`
 
         return (
           <g key={line.key}>
-            {/* Shadow/glow line */}
+            {/* Subtle glow */}
+            <path d={path} fill="none" stroke={line.color} strokeWidth="4" strokeOpacity="0.06" />
+            {/* Main curve */}
             <path
-              d={`M ${x1} ${y1} C ${x1 + cpx} ${y1}, ${x2 - cpx} ${y2}, ${x2} ${y2}`}
-              fill="none"
-              stroke={line.color}
-              strokeWidth="6"
-              strokeOpacity="0.08"
-              filter="blur(4px)"
-            />
-            {/* Main line */}
-            <path
-              d={`M ${x1} ${y1} C ${x1 + cpx} ${y1}, ${x2 - cpx} ${y2}, ${x2} ${y2}`}
+              d={path}
               fill="none"
               stroke={`url(#conn-grad-${line.key})`}
-              strokeWidth="2"
+              strokeWidth="1.5"
               strokeLinecap="round"
             />
-            {/* Animated flow dots */}
-            <circle r="2.5" fill={line.color} opacity="0.7">
-              <animateMotion
-                dur="2s"
-                repeatCount="indefinite"
-                path={`M ${x1} ${y1} C ${x1 + cpx} ${y1}, ${x2 - cpx} ${y2}, ${x2} ${y2}`}
-              />
-            </circle>
+            {/* End dot */}
+            <circle cx={x2} cy={y2} r="2" fill={line.color} opacity="0.4" />
           </g>
         )
       })}
@@ -837,49 +816,37 @@ export function WorkflowEditorPage() {
             )}
 
             {/* Drag line overlay */}
-            {dragState && (
-              <svg
-                className="pointer-events-none"
-                style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 9999 }}
-              >
-                <defs>
-                  <linearGradient id="drag-grad" x1="0" x2="1" y1="0" y2="0">
-                    <stop offset="0%" stopColor={PORT_COLOR[dragState.sourcePortType]} stopOpacity="0.8" />
-                    <stop offset="100%" stopColor={PORT_COLOR[dragState.sourcePortType]} stopOpacity="0.3" />
-                  </linearGradient>
-                </defs>
-                {/* Shadow */}
-                <line
-                  x1={dragState.startX}
-                  y1={dragState.startY}
-                  x2={dragState.mouseX}
-                  y2={dragState.mouseY}
-                  stroke={PORT_COLOR[dragState.sourcePortType]}
-                  strokeWidth="6"
-                  strokeOpacity="0.1"
-                  filter="blur(4px)"
-                />
-                {/* Main line */}
-                <line
-                  x1={dragState.startX}
-                  y1={dragState.startY}
-                  x2={dragState.mouseX}
-                  y2={dragState.mouseY}
-                  stroke="url(#drag-grad)"
-                  strokeWidth="2"
-                  strokeDasharray="8 4"
-                  strokeLinecap="round"
+            {dragState && (() => {
+              const dx = dragState.mouseX - dragState.startX
+              const cpx = Math.max(Math.abs(dx) * 0.4, 40)
+              const dragPath = `M ${dragState.startX} ${dragState.startY} C ${dragState.startX + cpx} ${dragState.startY}, ${dragState.mouseX - cpx} ${dragState.mouseY}, ${dragState.mouseX} ${dragState.mouseY}`
+              const color = PORT_COLOR[dragState.sourcePortType]
+              return (
+                <svg
+                  className="pointer-events-none"
+                  style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 9999 }}
                 >
-                  <animate attributeName="stroke-dashoffset" values="0;-24" dur="0.6s" repeatCount="indefinite" />
-                </line>
-                {/* Cursor dot */}
-                <circle cx={dragState.mouseX} cy={dragState.mouseY} r="5" fill={PORT_COLOR[dragState.sourcePortType]} opacity="0.6">
-                  <animate attributeName="r" values="4;6;4" dur="0.8s" repeatCount="indefinite" />
-                </circle>
-                {/* Origin dot */}
-                <circle cx={dragState.startX} cy={dragState.startY} r="3" fill={PORT_COLOR[dragState.sourcePortType]} opacity="0.8" />
-              </svg>
-            )}
+                  {/* Subtle glow */}
+                  <path d={dragPath} fill="none" stroke={color} strokeWidth="4" strokeOpacity="0.08" />
+                  {/* Main curve */}
+                  <path
+                    d={dragPath}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth="1.5"
+                    strokeOpacity="0.5"
+                    strokeDasharray="6 4"
+                    strokeLinecap="round"
+                  >
+                    <animate attributeName="stroke-dashoffset" values="0;-20" dur="0.8s" repeatCount="indefinite" />
+                  </path>
+                  {/* Cursor dot */}
+                  <circle cx={dragState.mouseX} cy={dragState.mouseY} r="4" fill={color} opacity="0.5" />
+                  {/* Origin dot */}
+                  <circle cx={dragState.startX} cy={dragState.startY} r="2.5" fill={color} opacity="0.6" />
+                </svg>
+              )
+            })()}
           </div>
 
           {/* Bindings summary */}
