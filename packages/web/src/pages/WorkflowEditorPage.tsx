@@ -453,7 +453,10 @@ export function WorkflowEditorPage() {
     e: React.MouseEvent,
   ) => {
     e.preventDefault()
-    const rect = (e.target as HTMLElement).getBoundingClientRect()
+    // Find the actual dot element within the row, not whatever text/span was clicked
+    const row = e.currentTarget as HTMLElement
+    const dot = row.querySelector('[data-port-id]') as HTMLElement | null
+    const rect = dot ? dot.getBoundingClientRect() : row.getBoundingClientRect()
     setDragState({
       sourceType,
       sourceStepPosition,
@@ -467,10 +470,8 @@ export function WorkflowEditorPage() {
   }, [])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (dragState) {
-      setDragState({ ...dragState, mouseX: e.clientX, mouseY: e.clientY })
-    }
-  }, [dragState])
+    setDragState((prev) => prev ? { ...prev, mouseX: e.clientX, mouseY: e.clientY } : null)
+  }, [])
 
   const handleMouseUp = useCallback(() => {
     setDragState(null)
@@ -630,8 +631,11 @@ export function WorkflowEditorPage() {
             )}
 
             {/* Drag line overlay */}
-            {dragState && canvasRef.current && (
-              <svg className="fixed inset-0 w-full h-full pointer-events-none z-50" style={{ position: 'fixed', top: 0, left: 0 }}>
+            {dragState && (
+              <svg
+                className="pointer-events-none"
+                style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 9999 }}
+              >
                 <line
                   x1={dragState.startX}
                   y1={dragState.startY}
