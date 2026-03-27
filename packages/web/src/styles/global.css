@@ -41,3 +41,15 @@ body {
   background: #484847;
   border-radius: 10px;
 }
+
+/* Workflow editor animations */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
