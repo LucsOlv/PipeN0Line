@@ -109,13 +109,16 @@ function resolveBinding(binding, taskData, stepOutputs) {
 }
 class RunsService {
     db;
-    constructor(db) {
+    logger;
+    constructor(db, logger) {
         this.db = db;
+        this.logger = logger;
     }
     async create(input) {
         const result = await this.db
             .insert(schema_1.pipelineRuns)
             .values({
+            taskId: input.taskId,
             projectName: input.projectName,
             projectPath: input.projectPath,
             branch: input.branch,
@@ -168,10 +171,65 @@ class RunsService {
             .where((0, drizzle_orm_1.eq)(schema_1.runStepResults.runId, runId))
             .orderBy((0, drizzle_orm_1.asc)(schema_1.runStepResults.position));
     }
-    async execute(id, copilotService) {
+    async cancel(id) {
+        const run = await this.get(id);
+        if (!run)
+            throw new Error('Run not found');
+        if (run.status !== 'pending' && run.status !== 'running') {
+            throw new Error(`Cannot cancel run with status "${run.status}"`);
+        }
+        await this.db
+            .update(schema_1.pipelineRuns)
+            .set({ status: 'cancelled', completedAt: new Date().toISOString() })
+            .where((0, drizzle_orm_1.eq)(schema_1.pipelineRuns.id, id));
+        this.logger?.log({
+            level: 'warn',
+            category: 'run',
+            event: 'run.cancelled',
+            runId: id,
+            message: `Run #${id} cancelled by user`,
+        });
+    }
+    async delete(id) {
+        const run = await this.get(id);
+        if (!run)
+            throw new Error('Run not found');
+        if (run.status === 'pending' || run.status === 'running') {
+            throw new Error('Cannot delete an active run. Cancel it first.');
+        }
+        await this.db.delete(schema_1.runStepResults).where((0, drizzle_orm_1.eq)(schema_1.runStepResults.runId, id));
+        await this.db.delete(schema_1.pipelineRuns).where((0, drizzle_orm_1.eq)(schema_1.pipelineRuns.id, id));
+    }
+    async skipStep(stepResultId) {
+        const rows = await this.db
+            .select()
+            .from(schema_1.runStepResults)
+            .where((0, drizzle_orm_1.eq)(schema_1.runStepResults.id, stepResultId))
+            .limit(1);
+        const step = rows[0];
+        if (!step)
+            throw new Error('Step not found');
+        if (step.status !== 'pending') {
+            throw new Error(`Cannot skip step with status "${step.status}"`);
+        }
+        await this.db
+            .update(schema_1.runStepResults)
+            .set({ status: 'skipped', completedAt: new Date().toISOString() })
+            .where((0, drizzle_orm_1.eq)(schema_1.runStepResults.id, stepResultId));
+        this.logger?.log({
+            level: 'warn',
+            category: 'step',
+            event: 'step.skipped',
+            runId: step.runId,
+            stepResultId,
+            message: `Step skipped by user`,
+        });
+    }
+    async execute(id, copilotService, tasksService) {
         const run = await this.get(id);
         if (!run)
             return;
+        const runStartMs = Date.now();
         await this.db
             .update(schema_1.pipelineRuns)
             .set({ status: 'running', startedAt: new Date().toISOString() })
@@ -183,12 +241,20 @@ class RunsService {
             collectFiles(run.projectPath, run.projectPath, files, bytesRef);
             const projectContext = buildProjectContext(run.projectName, run.branch, files);
             // Task data available for bindings
+            const task = run.taskId ? await tasksService.get(run.taskId) : null;
             const taskData = {
+                task_name: task?.name ?? run.projectName,
+                task_description: task?.description ?? '',
                 files: projectContext,
                 project_name: run.projectName,
                 branch: run.branch,
                 project_path: run.projectPath,
             };
+            this.logger?.logRunStarted(id, {
+                taskName: task?.name,
+                projectPath: run.projectPath,
+                workflowId: run.workflowId,
+            });
             // Fetch workflow steps with their node definitions
             const steps = run.workflowId
                 ? await this.db
@@ -210,25 +276,81 @@ class RunsService {
             if (steps.length === 0) {
                 throw new Error('Workflow has no steps configured');
             }
+            // Pre-create all step results as 'pending' so they are immediately visible in the UI
+            // and so the user can skip individual steps before they execute
+            const preCreated = await this.db
+                .insert(schema_1.runStepResults)
+                .values(steps.map((step) => ({
+                runId: id,
+                stepId: step.id,
+                nodeId: step.nodeId,
+                position: step.position,
+                status: 'pending',
+                startedAt: new Date().toISOString(),
+            })))
+                .returning({ id: schema_1.runStepResults.id, position: schema_1.runStepResults.position });
+            // Map position → pre-created step result ID
+            const stepResultIdByPosition = new Map(preCreated.map((r) => [r.position, r.id]));
             // Store outputs by step position for binding resolution
             const stepOutputs = new Map();
             let lastOutput = '';
             for (const step of steps) {
+                // Check if run was cancelled between steps
+                const freshRun = await this.get(id);
+                if (freshRun?.status === 'cancelled') {
+                    // Mark remaining pending steps as skipped
+                    const pendingIds = steps
+                        .filter((s) => s.position >= step.position)
+                        .map((s) => stepResultIdByPosition.get(s.position))
+                        .filter((sid) => sid !== undefined);
+                    if (pendingIds.length > 0) {
+                        await this.db
+                            .update(schema_1.runStepResults)
+                            .set({ status: 'skipped', completedAt: new Date().toISOString() })
+                            .where((0, drizzle_orm_1.inArray)(schema_1.runStepResults.id, pendingIds));
+                    }
+                    return;
+                }
+                const stepResultId = stepResultIdByPosition.get(step.position);
+                // Check if this step was skipped by the user before it ran
+                const stepRow = await this.db
+                    .select({ status: schema_1.runStepResults.status })
+                    .from(schema_1.runStepResults)
+                    .where((0, drizzle_orm_1.eq)(schema_1.runStepResults.id, stepResultId))
+                    .limit(1);
+                if (stepRow[0]?.status === 'skipped') {
+                    this.logger?.log({
+                        level: 'info',
+                        category: 'step',
+                        event: 'step.skipped',
+                        runId: id,
+                        stepResultId,
+                        message: `Step #${step.position + 1} "${step.name}" skipped`,
+                    });
+                    continue;
+                }
                 // Resolve input from bindings or fallback to previous output / project context
                 const stepConfig = parseStepConfig(step.config);
+                // Log individual binding resolutions
+                for (const [portKey, binding] of Object.entries(stepConfig.bindings)) {
+                    this.logger?.logBindingResolved(id, stepResultId, portKey, binding.source, binding.field, step.position);
+                }
                 const resolvedInput = resolveBindings(stepConfig, taskData, stepOutputs, step.position, projectContext);
-                const [stepResult] = await this.db
-                    .insert(schema_1.runStepResults)
-                    .values({
-                    runId: id,
-                    stepId: step.id,
-                    nodeId: step.nodeId,
+                // Update step to running
+                await this.db
+                    .update(schema_1.runStepResults)
+                    .set({ status: 'running', input: resolvedInput.slice(0, 10000), startedAt: new Date().toISOString() })
+                    .where((0, drizzle_orm_1.eq)(schema_1.runStepResults.id, stepResultId));
+                this.logger?.logStepStarted(id, stepResultId, {
                     position: step.position,
-                    status: 'running',
-                    input: resolvedInput.slice(0, 10000),
-                    startedAt: new Date().toISOString(),
-                })
-                    .returning({ id: schema_1.runStepResults.id });
+                    nodeName: step.name,
+                    stepId: step.id,
+                });
+                this.logger?.logStepInputResolved(id, stepResultId, resolvedInput, step.position);
+                // Set context on proxy so AI logs carry runId + stepResultId
+                if ('setContext' in copilotService) {
+                    copilotService.setContext(id, stepResultId);
+                }
                 try {
                     const prompt = `${step.systemPrompt}\n\n--- INPUT ---\n\n${resolvedInput}`;
                     const result = await copilotService.query({
@@ -244,7 +366,8 @@ class RunsService {
                         output: lastOutput,
                         completedAt: new Date().toISOString(),
                     })
-                        .where((0, drizzle_orm_1.eq)(schema_1.runStepResults.id, stepResult.id));
+                        .where((0, drizzle_orm_1.eq)(schema_1.runStepResults.id, stepResultId));
+                    this.logger?.logStepCompleted(id, stepResultId, lastOutput, step.position);
                 }
                 catch (stepErr) {
                     const errorMsg = stepErr instanceof Error ? stepErr.message : 'Unknown step error';
@@ -255,7 +378,8 @@ class RunsService {
                         output: errorMsg,
                         completedAt: new Date().toISOString(),
                     })
-                        .where((0, drizzle_orm_1.eq)(schema_1.runStepResults.id, stepResult.id));
+                        .where((0, drizzle_orm_1.eq)(schema_1.runStepResults.id, stepResultId));
+                    this.logger?.logStepFailed(id, stepResultId, errorMsg, step.position, step.name);
                     throw new Error(`Step "${step.name}" failed: ${errorMsg}`);
                 }
             }
@@ -287,16 +411,27 @@ class RunsService {
                 completedAt: new Date().toISOString(),
             })
                 .where((0, drizzle_orm_1.eq)(schema_1.pipelineRuns.id, id));
+            this.logger?.logRunCompleted(id, {
+                durationMs: Date.now() - runStartMs,
+                score,
+                status: 'completed',
+            });
         }
         catch (err) {
+            const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+            // Don't overwrite 'cancelled' status
+            const currentRun = await this.get(id);
+            if (currentRun?.status === 'cancelled')
+                return;
             await this.db
                 .update(schema_1.pipelineRuns)
                 .set({
                 status: 'error',
-                summary: err instanceof Error ? err.message : 'Unknown error',
+                summary: errorMsg,
                 completedAt: new Date().toISOString(),
             })
                 .where((0, drizzle_orm_1.eq)(schema_1.pipelineRuns.id, id));
+            this.logger?.logRunFailed(id, errorMsg);
         }
     }
 }

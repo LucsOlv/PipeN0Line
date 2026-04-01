@@ -7,23 +7,25 @@ import { useNavigate } from 'react-router-dom'
 function mapRunToPipeline(run: {
   id: number
   projectName: string
+  taskId: number | null
   branch: string
   status: string
   workflowId: number | null
   createdAt: string
-}, workflowName?: string): Pipeline {
+}, workflowName?: string, taskName?: string): Pipeline {
   const statusMap: Record<string, Pipeline['status']> = {
     pending: 'pending',
     running: 'running',
     completed: 'completed',
     stopped: 'stopped',
+    cancelled: 'stopped',
     error: 'stopped',
   }
 
   return {
     id: String(run.id),
     tag: `RUN-${run.id}`,
-    name: run.projectName,
+    name: taskName ?? run.projectName,
     status: statusMap[run.status] ?? 'pending',
     steps: [
       {
@@ -46,6 +48,8 @@ function mapRunToPipeline(run: {
 
 export function DashboardPage() {
   const navigate = useNavigate()
+  const utils = trpc.useUtils()
+
   const { data: runs, isLoading } = trpc.runs.list.useQuery(undefined, {
     refetchInterval: (query) => {
       const hasActive = query.state.data?.some(
@@ -54,10 +58,23 @@ export function DashboardPage() {
       return hasActive ? 2000 : false
     },
   })
+
+  const cancelMutation = trpc.runs.cancel.useMutation({
+    onSuccess: () => utils.runs.list.invalidate(),
+  })
+  const deleteMutation = trpc.runs.delete.useMutation({
+    onSuccess: () => utils.runs.list.invalidate(),
+  })
   const { data: workflowsList } = trpc.workflows.list.useQuery()
+  const { data: tasksList } = trpc.tasks.list.useQuery({})
 
   const workflowMap = new Map(workflowsList?.map((w) => [w.id, w.name]) ?? [])
-  const pipelines = runs?.map((r) => mapRunToPipeline(r, r.workflowId ? workflowMap.get(r.workflowId) : undefined)) ?? []
+  const taskMap = new Map(tasksList?.map((t) => [t.id, t.name]) ?? [])
+  const pipelines = runs?.map((r) => mapRunToPipeline(
+    r,
+    r.workflowId ? workflowMap.get(r.workflowId) : undefined,
+    r.taskId ? taskMap.get(r.taskId) : undefined
+  )) ?? []
 
   return (
     <>
@@ -79,15 +96,24 @@ export function DashboardPage() {
             </div>
           ))
         ) : pipelines.length > 0 ? (
-          pipelines.map((pipeline, i) => (
+        pipelines.map((pipeline, i) => {
+            const runId = Number(pipeline.id)
+            const runStatus = runs?.[i]?.status
+            return (
             <PipelineCard
               key={pipeline.id}
               pipeline={pipeline}
               score={runs?.[i]?.score}
               onClick={() => navigate(`/run/${pipeline.id}`)}
               onLogs={() => navigate(`/run/${pipeline.id}`)}
+              onStop={() => cancelMutation.mutate({ id: runId })}
+              onRetry={() => navigate('/run/new')}
+              {...(runStatus !== 'pending' && runStatus !== 'running'
+                ? { onDelete: () => { if (confirm('Apagar esta run?')) deleteMutation.mutate({ id: runId }) } }
+                : {})}
             />
-          ))
+            )
+          })
         ) : (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center mb-6">

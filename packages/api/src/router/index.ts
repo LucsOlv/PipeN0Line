@@ -7,6 +7,8 @@ import { projectsRouter } from './projects.router'
 import { runsRouter } from './runs.router'
 import { nodesRouter } from './nodes.router'
 import { workflowsRouter } from './workflows.router'
+import { tasksRouter } from './tasks.router'
+import { logsRouter } from './logs.router'
 
 export const appRouter = t.mergeRouters(
   helloRouter,
@@ -18,6 +20,8 @@ export const appRouter = t.mergeRouters(
     runs: runsRouter,
     nodes: nodesRouter,
     workflows: workflowsRouter,
+    tasks: tasksRouter,
+    logs: logsRouter,
   })
 )
 

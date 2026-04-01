@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runStepResults = exports.workflowSteps = exports.workflows = exports.aiNodes = exports.pipelineRuns = exports.featureFlags = exports.appConfig = void 0;
+exports.runStepResults = exports.workflowSteps = exports.workflows = exports.aiNodes = exports.pipelineRuns = exports.tasks = exports.systemLogs = exports.featureFlags = exports.appConfig = void 0;
 const sqlite_core_1 = require("drizzle-orm/sqlite-core");
 const drizzle_orm_1 = require("drizzle-orm");
 exports.appConfig = (0, sqlite_core_1.sqliteTable)('app_config', {
@@ -13,8 +13,30 @@ exports.featureFlags = (0, sqlite_core_1.sqliteTable)('feature_flags', {
     enabled: (0, sqlite_core_1.integer)('enabled', { mode: 'boolean' }).notNull().default(false),
     description: (0, sqlite_core_1.text)('description').notNull().default(''),
 });
+exports.systemLogs = (0, sqlite_core_1.sqliteTable)('system_logs', {
+    id: (0, sqlite_core_1.integer)('id').primaryKey({ autoIncrement: true }),
+    level: (0, sqlite_core_1.text)('level').notNull().default('info'),
+    category: (0, sqlite_core_1.text)('category').notNull().default('system'),
+    event: (0, sqlite_core_1.text)('event').notNull(),
+    runId: (0, sqlite_core_1.integer)('run_id'),
+    stepResultId: (0, sqlite_core_1.integer)('step_result_id'),
+    message: (0, sqlite_core_1.text)('message').notNull(),
+    metadata: (0, sqlite_core_1.text)('metadata'),
+    createdAt: (0, sqlite_core_1.text)('created_at').notNull().default((0, drizzle_orm_1.sql) `(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+});
+exports.tasks = (0, sqlite_core_1.sqliteTable)('tasks', {
+    id: (0, sqlite_core_1.integer)('id').primaryKey({ autoIncrement: true }),
+    name: (0, sqlite_core_1.text)('name').notNull(),
+    description: (0, sqlite_core_1.text)('description').notNull().default(''),
+    projectName: (0, sqlite_core_1.text)('project_name').notNull(),
+    projectPath: (0, sqlite_core_1.text)('project_path').notNull(),
+    branch: (0, sqlite_core_1.text)('branch').notNull(),
+    createdAt: (0, sqlite_core_1.text)('created_at').notNull().default((0, drizzle_orm_1.sql) `(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+    updatedAt: (0, sqlite_core_1.text)('updated_at').notNull().default((0, drizzle_orm_1.sql) `(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+});
 exports.pipelineRuns = (0, sqlite_core_1.sqliteTable)('pipeline_runs', {
     id: (0, sqlite_core_1.integer)('id').primaryKey({ autoIncrement: true }),
+    taskId: (0, sqlite_core_1.integer)('task_id'),
     projectName: (0, sqlite_core_1.text)('project_name').notNull(),
     projectPath: (0, sqlite_core_1.text)('project_path').notNull(),
     branch: (0, sqlite_core_1.text)('branch').notNull(),

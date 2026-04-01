@@ -13,8 +13,32 @@ export const featureFlags = sqliteTable('feature_flags', {
   description: text('description').notNull().default(''),
 })
 
+export const systemLogs = sqliteTable('system_logs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  level: text('level').notNull().default('info'),
+  category: text('category').notNull().default('system'),
+  event: text('event').notNull(),
+  runId: integer('run_id'),
+  stepResultId: integer('step_result_id'),
+  message: text('message').notNull(),
+  metadata: text('metadata'),
+  createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+})
+
+export const tasks = sqliteTable('tasks', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  projectName: text('project_name').notNull(),
+  projectPath: text('project_path').notNull(),
+  branch: text('branch').notNull(),
+  createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+  updatedAt: text('updated_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+})
+
 export const pipelineRuns = sqliteTable('pipeline_runs', {
   id: integer('id').primaryKey({ autoIncrement: true }),
+  taskId: integer('task_id'),
   projectName: text('project_name').notNull(),
   projectPath: text('project_path').notNull(),
   branch: text('branch').notNull(),

@@ -10,6 +10,8 @@ import { RunDetailPage } from './pages/RunDetailPage'
 import { NodesPage } from './pages/NodesPage'
 import { WorkflowsPage } from './pages/WorkflowsPage'
 import { WorkflowEditorPage } from './pages/WorkflowEditorPage'
+import { TasksPage } from './pages/TasksPage'
+import { LogsPage } from './pages/LogsPage'
 
 const queryClient = new QueryClient()
 
@@ -24,6 +26,8 @@ const router = createBrowserRouter([
       { path: '/', element: <DashboardPage /> },
       { path: '/run/new', element: <CreateRunPage /> },
       { path: '/run/:id', element: <RunDetailPage /> },
+      { path: '/tasks', element: <TasksPage /> },
+      { path: '/logs', element: <LogsPage /> },
       { path: '/nodes', element: <NodesPage /> },
       { path: '/workflows', element: <WorkflowsPage /> },
       { path: '/workflows/:id', element: <WorkflowEditorPage /> },

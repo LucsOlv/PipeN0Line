@@ -7,14 +7,25 @@ export function CreateRunPage() {
   const navigate = useNavigate()
   const [projectPath, setProjectPath] = useState('')
   const [projectName, setProjectName] = useState('')
+
+  // Task state
+  const [taskMode, setTaskMode] = useState<'select' | 'new'>('new')
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
+  const [taskName, setTaskName] = useState('')
+  const [taskDescription, setTaskDescription] = useState('')
   const [branch, setBranch] = useState('')
+
   const [workflowId, setWorkflowId] = useState<number | null>(null)
   const [debugMode, setDebugMode] = useState(true)
 
   const { data: projects, isLoading: projectsLoading } = trpc.projects.list.useQuery()
+  const { data: projectTasks } = trpc.tasks.list.useQuery(
+    { projectPath },
+    { enabled: !!projectPath }
+  )
   const { data: branchData, isLoading: branchesLoading } = trpc.projects.branches.useQuery(
     { path: projectPath },
-    { enabled: !!projectPath, retry: 0, staleTime: 30_000 }
+    { enabled: !!projectPath && taskMode === 'new', retry: 0, staleTime: 30_000 }
   )
   const { data: workflowsList } = trpc.workflows.list.useQuery()
   const { data: selectedWorkflow } = trpc.workflows.get.useQuery(
@@ -25,21 +36,48 @@ export function CreateRunPage() {
   const branches = branchData?.branches ?? []
   const isGitRepo = branchData?.isGitRepo ?? true
 
+  const createTask = trpc.tasks.create.useMutation()
   const createRun = trpc.runs.create.useMutation({
     onSuccess: (data) => navigate(`/run/${data.id}`),
   })
+
+  const selectedTask = projectTasks?.find((t) => t.id === selectedTaskId)
+  const effectiveBranch = taskMode === 'select' ? (selectedTask?.branch ?? '') : branch
 
   const handleProjectChange = (path: string) => {
     const found = projects?.find((p) => p.path === path)
     setProjectPath(path)
     setProjectName(found?.name ?? '')
     setBranch('')
+    setSelectedTaskId(null)
+    setTaskMode('new')
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleTaskSelect = (taskId: number) => {
+    setSelectedTaskId(taskId)
+    setTaskMode('select')
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!projectPath || !branch || !workflowId) return
-    createRun.mutate({ projectName, projectPath, branch, workflowId, debugMode })
+    if (!projectPath || !workflowId || !effectiveBranch) return
+
+    let taskId = selectedTaskId
+
+    if (taskMode === 'new') {
+      if (!taskName.trim()) return
+      const newTask = await createTask.mutateAsync({
+        name: taskName.trim(),
+        description: taskDescription.trim(),
+        projectName,
+        projectPath,
+        branch,
+      })
+      taskId = newTask.id
+    }
+
+    if (!taskId) return
+    createRun.mutate({ taskId, workflowId, debugMode })
   }
 
   const NODE_COLORS: Record<string, string> = {
@@ -50,6 +88,10 @@ export function CreateRunPage() {
     orange: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
     red: 'bg-red-500/20 text-red-400 border-red-500/30',
   }
+
+  const isPending = createTask.isPending || createRun.isPending
+  const canSubmit = !!projectPath && !!workflowId && !!effectiveBranch &&
+    (taskMode === 'select' ? !!selectedTaskId : !!taskName.trim())
 
   return (
     <div className="max-w-4xl mx-auto py-8">
@@ -122,85 +164,163 @@ export function CreateRunPage() {
               )}
             </div>
 
-            {/* Branch */}
-            <div className="space-y-3">
-              <label className="block text-sm font-semibold text-on-surface-variant font-label">
-                Branch
-              </label>
-
-              {branchesLoading && projectPath ? (
-                <div className="flex items-center gap-3 bg-surface-container-low px-4 py-4 rounded-xl text-on-surface-variant text-sm">
-                  <Icon name="progress_activity" className="animate-spin text-primary" size={18} />
-                  <span>Lendo branches do repositório...</span>
-                </div>
-              ) : projectPath && !isGitRepo ? (
-                <>
-                  <div className="flex items-center gap-3 bg-surface-container-low border border-outline-variant/40 px-4 py-4 rounded-xl text-sm">
-                    <Icon name="info" size={18} className="text-on-surface-variant flex-shrink-0" />
-                    <span className="text-on-surface-variant">
-                      Este projeto não tem repositório Git. Digite o branch manualmente.
-                    </span>
-                  </div>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60">
-                      <Icon name="account_tree" className="text-lg" />
-                    </span>
-                    <input
-                      value={branch}
-                      onChange={(e) => setBranch(e.target.value)}
-                      className="w-full bg-surface-container-low text-on-surface pl-12 pr-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest transition-all placeholder:text-on-surface-variant/40"
-                      placeholder="main, develop, feature/xxx"
-                      type="text"
-                    />
-                  </div>
-                  <div className="flex gap-2 pt-1">
-                    {['main', 'develop', 'staging'].map((b) => (
+            {/* Task */}
+            {projectPath && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-semibold text-on-surface-variant font-label">
+                    Task
+                  </label>
+                  {projectTasks && projectTasks.length > 0 && (
+                    <div className="flex gap-1 bg-surface-container-highest rounded-lg p-0.5">
                       <button
-                        key={b}
                         type="button"
-                        onClick={() => setBranch(b)}
-                        className="px-2 py-1 bg-surface-container-highest text-[10px] text-on-surface-variant rounded border border-white/5 cursor-pointer hover:border-primary/40 transition-colors"
+                        onClick={() => { setTaskMode('select'); setBranch('') }}
+                        className={`text-xs px-3 py-1 rounded-md transition-colors ${taskMode === 'select' ? 'bg-primary/20 text-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
                       >
-                        {b}
+                        Existente
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setTaskMode('new'); setSelectedTaskId(null) }}
+                        className={`text-xs px-3 py-1 rounded-md transition-colors ${taskMode === 'new' ? 'bg-primary/20 text-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
+                      >
+                        Nova Task
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {taskMode === 'select' && projectTasks && projectTasks.length > 0 ? (
+                  <div className="space-y-2">
+                    {projectTasks.map((task) => (
+                      <button
+                        key={task.id}
+                        type="button"
+                        onClick={() => handleTaskSelect(task.id)}
+                        className={`w-full text-left p-4 rounded-xl border transition-all ${
+                          selectedTaskId === task.id
+                            ? 'border-primary/40 bg-primary/10'
+                            : 'border-white/5 bg-surface-container-low hover:border-white/10 hover:bg-surface-container'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-on-surface truncate">{task.name}</p>
+                            {task.description && (
+                              <p className="text-xs text-on-surface-variant mt-0.5 line-clamp-2">{task.description}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs text-on-surface-variant flex-shrink-0">
+                            <Icon name="account_tree" size={12} />
+                            <span>{task.branch}</span>
+                          </div>
+                        </div>
                       </button>
                     ))}
                   </div>
-                </>
-              ) : projectPath && branches.length > 0 ? (
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60 pointer-events-none">
-                    <Icon name="account_tree" className="text-lg" />
-                  </span>
-                  <select
-                    value={branch}
-                    onChange={(e) => setBranch(e.target.value)}
-                    className="w-full bg-surface-container-low text-on-surface pl-12 pr-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest appearance-none transition-all cursor-pointer"
-                  >
-                    <option value="" disabled>Selecione um branch...</option>
-                    {branches.map((b) => (
-                      <option key={b} value={b}>{b}</option>
-                    ))}
-                  </select>
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-on-surface-variant">
-                    <Icon name="expand_more" />
+                ) : (
+                  <div className="space-y-3">
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60">
+                        <Icon name="task_alt" className="text-lg" />
+                      </span>
+                      <input
+                        value={taskName}
+                        onChange={(e) => setTaskName(e.target.value)}
+                        className="w-full bg-surface-container-low text-on-surface pl-12 pr-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest transition-all placeholder:text-on-surface-variant/40"
+                        placeholder="Nome da task..."
+                        type="text"
+                        required={taskMode === 'new'}
+                      />
+                    </div>
+                    <textarea
+                      value={taskDescription}
+                      onChange={(e) => setTaskDescription(e.target.value)}
+                      className="w-full bg-surface-container-low text-on-surface px-4 py-3 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest transition-all placeholder:text-on-surface-variant/40 resize-none text-sm"
+                      placeholder="Descrição da task (opcional)..."
+                      rows={2}
+                    />
+
+                    {/* Branch (only for new tasks) */}
+                    <div className="space-y-3">
+                      <label className="block text-xs font-semibold text-on-surface-variant font-label">Branch</label>
+                      {branchesLoading ? (
+                        <div className="flex items-center gap-3 bg-surface-container-low px-4 py-4 rounded-xl text-on-surface-variant text-sm">
+                          <Icon name="progress_activity" className="animate-spin text-primary" size={18} />
+                          <span>Lendo branches do repositório...</span>
+                        </div>
+                      ) : projectPath && !isGitRepo ? (
+                        <>
+                          <div className="flex items-center gap-3 bg-surface-container-low border border-outline-variant/40 px-4 py-4 rounded-xl text-sm">
+                            <Icon name="info" size={18} className="text-on-surface-variant flex-shrink-0" />
+                            <span className="text-on-surface-variant">
+                              Este projeto não tem repositório Git. Digite o branch manualmente.
+                            </span>
+                          </div>
+                          <div className="relative">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60">
+                              <Icon name="account_tree" className="text-lg" />
+                            </span>
+                            <input
+                              value={branch}
+                              onChange={(e) => setBranch(e.target.value)}
+                              className="w-full bg-surface-container-low text-on-surface pl-12 pr-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest transition-all placeholder:text-on-surface-variant/40"
+                              placeholder="main, develop, feature/xxx"
+                              type="text"
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            {['main', 'develop', 'staging'].map((b) => (
+                              <button
+                                key={b}
+                                type="button"
+                                onClick={() => setBranch(b)}
+                                className="px-2 py-1 bg-surface-container-highest text-[10px] text-on-surface-variant rounded border border-white/5 cursor-pointer hover:border-primary/40 transition-colors"
+                              >
+                                {b}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      ) : branches.length > 0 ? (
+                        <div className="relative">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60 pointer-events-none">
+                            <Icon name="account_tree" className="text-lg" />
+                          </span>
+                          <select
+                            value={branch}
+                            onChange={(e) => setBranch(e.target.value)}
+                            className="w-full bg-surface-container-low text-on-surface pl-12 pr-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest appearance-none transition-all cursor-pointer"
+                          >
+                            <option value="" disabled>Selecione um branch...</option>
+                            {branches.map((b) => (
+                              <option key={b} value={b}>{b}</option>
+                            ))}
+                          </select>
+                          <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-on-surface-variant">
+                            <Icon name="expand_more" />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60">
+                            <Icon name="account_tree" className="text-lg" />
+                          </span>
+                          <input
+                            value={branch}
+                            onChange={(e) => setBranch(e.target.value)}
+                            className="w-full bg-surface-container-low text-on-surface pl-12 pr-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest transition-all placeholder:text-on-surface-variant/40"
+                            placeholder="Digite o branch..."
+                            type="text"
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary/60">
-                    <Icon name="account_tree" className="text-lg" />
-                  </span>
-                  <input
-                    value={branch}
-                    onChange={(e) => setBranch(e.target.value)}
-                    className="w-full bg-surface-container-low text-on-surface pl-12 pr-4 py-4 rounded-xl border-none focus:ring-1 focus:ring-primary/40 focus:bg-surface-container-highest transition-all placeholder:text-on-surface-variant/40"
-                    placeholder="Selecione um projeto primeiro"
-                    type="text"
-                    disabled={!projectPath}
-                  />
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {/* Workflow */}
             <div className="space-y-3">
@@ -309,7 +429,7 @@ export function CreateRunPage() {
             </div>
 
             {/* Error */}
-            {createRun.isError && (
+            {(createRun.isError || createTask.isError) && (
               <p className="text-sm text-error flex items-center gap-1">
                 <Icon name="error" size={16} /> Erro ao criar execução. Tente novamente.
               </p>
@@ -319,10 +439,10 @@ export function CreateRunPage() {
             <div className="flex flex-col sm:flex-row gap-4 pt-6">
               <button
                 type="submit"
-                disabled={!projectPath || !branch || !workflowId || createRun.isPending}
+                disabled={!canSubmit || isPending}
                 className="flex-1 bg-gradient-to-b from-primary to-primary-dim text-on-primary font-bold py-4 px-8 rounded-xl hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {createRun.isPending
+                {isPending
                   ? <><Icon name="progress_activity" className="animate-spin" /> Criando...</>
                   : <><Icon name="play_arrow" fill className="text-xl" /> Confirmar / Iniciar</>
                 }
@@ -351,20 +471,38 @@ export function CreateRunPage() {
             </p>
           </div>
 
-          {/* Selected project info */}
+          {/* Selected project / task info */}
           {projectPath && (
             <div className="bg-surface-container rounded-xl p-6 border border-white/5 space-y-3">
-              <p className="text-[10px] text-on-surface-variant uppercase tracking-widest">Projeto Selecionado</p>
-              <p className="text-sm font-bold text-on-surface">{projectName}</p>
-              <p className="text-[10px] text-on-surface-variant truncate font-mono">{projectPath}</p>
-              {branch && (
-                <div className="flex items-center gap-1.5 text-xs text-primary">
-                  <Icon name="account_tree" size={14} />
-                  <span>{branch}</span>
-                </div>
-              )}
-              {branches.length > 0 && (
-                <p className="text-[10px] text-on-surface-variant">{branches.length} branches disponíveis</p>
+              <p className="text-[10px] text-on-surface-variant uppercase tracking-widest">
+                {selectedTask || (taskMode === 'new' && taskName) ? 'Task Selecionada' : 'Projeto Selecionado'}
+              </p>
+              {selectedTask ? (
+                <>
+                  <p className="text-sm font-bold text-on-surface">{selectedTask.name}</p>
+                  {selectedTask.description && (
+                    <p className="text-xs text-on-surface-variant line-clamp-2">{selectedTask.description}</p>
+                  )}
+                  <p className="text-[10px] text-on-surface-variant truncate font-mono">{projectPath}</p>
+                  <div className="flex items-center gap-1.5 text-xs text-primary">
+                    <Icon name="account_tree" size={14} />
+                    <span>{selectedTask.branch}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-bold text-on-surface">{taskName || projectName}</p>
+                  <p className="text-[10px] text-on-surface-variant truncate font-mono">{projectPath}</p>
+                  {branch && (
+                    <div className="flex items-center gap-1.5 text-xs text-primary">
+                      <Icon name="account_tree" size={14} />
+                      <span>{branch}</span>
+                    </div>
+                  )}
+                  {branches.length > 0 && (
+                    <p className="text-[10px] text-on-surface-variant">{branches.length} branches disponíveis</p>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -411,4 +549,4 @@ export function CreateRunPage() {
       </div>
     </div>
   )
-}
+}

@@ -18,6 +18,8 @@ const ctx: TrpcContext = {
   runsService: {} as never,
   nodesService: {} as never,
   workflowsService: {} as never,
+  tasksService: {} as never,
+  loggingService: {} as never,
 }
 
 const t = initTRPC.context<TrpcContext>().create()

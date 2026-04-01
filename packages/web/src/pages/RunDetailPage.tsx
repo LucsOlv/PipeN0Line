@@ -11,6 +11,7 @@ function mapStatus(s: string): PipelineStatus {
     running: 'running',
     completed: 'completed',
     error: 'stopped',
+    cancelled: 'stopped',
   }
   return map[s] ?? 'pending'
 }
@@ -53,6 +54,12 @@ function StepStatusIcon({ status }: { status: string }) {
           <Icon name="close" size={14} className="text-error" />
         </div>
       )
+    case 'skipped':
+      return (
+        <div className="w-6 h-6 rounded-full bg-on-surface-variant/10 flex items-center justify-center">
+          <Icon name="skip_next" size={14} className="text-on-surface-variant/50" />
+        </div>
+      )
     default:
       return (
         <div className="w-6 h-6 rounded-full bg-surface-container-highest flex items-center justify-center">
@@ -67,8 +74,12 @@ export function RunDetailPage() {
   const navigate = useNavigate()
   const runId = Number(id)
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set())
+  const [activeTab, setActiveTab] = useState<'steps' | 'logs'>('steps')
+  const [expandedLogMeta, setExpandedLogMeta] = useState<Set<number>>(new Set())
 
   const isActive = (s?: string) => s === 'pending' || s === 'running'
+
+  const utils = trpc.useUtils()
 
   const { data: run, isLoading } = trpc.runs.get.useQuery(
     { id: runId },
@@ -78,7 +89,30 @@ export function RunDetailPage() {
     }
   )
 
+  const cancelMutation = trpc.runs.cancel.useMutation({
+    onSuccess: () => utils.runs.get.invalidate({ id: runId }),
+  })
+  const deleteMutation = trpc.runs.delete.useMutation({
+    onSuccess: () => navigate('/'),
+  })
+  const skipStepMutation = trpc.runs.skipStep.useMutation({
+    onSuccess: () => utils.runs.getStepResults.invalidate({ runId }),
+  })
+
+  const { data: task } = trpc.tasks.get.useQuery(
+    { id: run?.taskId! },
+    { enabled: !!run?.taskId }
+  )
+
   const { data: stepResults } = trpc.runs.getStepResults.useQuery(
+    { runId },
+    {
+      enabled: !isNaN(runId),
+      refetchInterval: () => isActive(run?.status) ? 2000 : false,
+    }
+  )
+
+  const { data: runLogs } = trpc.logs.getForRun.useQuery(
     { runId },
     {
       enabled: !isNaN(runId),
@@ -91,6 +125,15 @@ export function RunDetailPage() {
       const next = new Set(prev)
       if (next.has(stepId)) next.delete(stepId)
       else next.add(stepId)
+      return next
+    })
+  }
+
+  const toggleLogMeta = (logId: number) => {
+    setExpandedLogMeta((prev) => {
+      const next = new Set(prev)
+      if (next.has(logId)) next.delete(logId)
+      else next.add(logId)
       return next
     })
   }
@@ -119,21 +162,94 @@ export function RunDetailPage() {
         <>
           {/* Header */}
           <header className="mb-10">
-            <div className="flex items-center gap-3 mb-2">
-              <span className="text-xs font-bold text-on-surface-variant font-label tracking-widest uppercase">
-                RUN-{run.id}
-              </span>
-              <StatusBadge status={mapStatus(run.status)} />
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-xs font-bold text-on-surface-variant font-label tracking-widest uppercase">
+                    RUN-{run.id}
+                  </span>
+                  <StatusBadge status={mapStatus(run.status)} />
+                  {run.status === 'cancelled' && (
+                    <span className="text-[10px] text-error/70 font-medium">Cancelado</span>
+                  )}
+                </div>
+                {task && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <Icon name="task_alt" size={14} className="text-primary/60" />
+                    <span className="text-xs text-primary font-medium">{task.name}</span>
+                  </div>
+                )}
+                <h1 className="text-4xl font-bold font-space-grotesk tracking-tight text-white mb-1">
+                  {run.projectName}
+                </h1>
+                <p className="text-on-surface-variant text-sm flex items-center gap-2">
+                  <Icon name="account_tree" className="text-base" />
+                  {run.branch}
+                </p>
+                {task?.description && (
+                  <p className="text-on-surface-variant/70 text-xs mt-2 max-w-lg">{task.description}</p>
+                )}
+              </div>
+              {/* Run action buttons */}
+              <div className="flex items-center gap-2 flex-shrink-0 pt-1">
+                {isActive(run.status) && (
+                  <button
+                    onClick={() => { if (confirm('Cancelar esta run?')) cancelMutation.mutate({ id: runId }) }}
+                    disabled={cancelMutation.isPending}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-error/10 hover:bg-error/20 text-error border border-error/20 text-xs font-medium transition-colors disabled:opacity-50"
+                  >
+                    <Icon name="stop_circle" size={14} />
+                    Cancelar
+                  </button>
+                )}
+                {!isActive(run.status) && (
+                  <button
+                    onClick={() => { if (confirm('Apagar esta run permanentemente?')) deleteMutation.mutate({ id: runId }) }}
+                    disabled={deleteMutation.isPending}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-surface-container hover:bg-error/10 text-on-surface-variant hover:text-error border border-white/5 text-xs font-medium transition-colors disabled:opacity-50"
+                  >
+                    <Icon name="delete" size={14} />
+                    Apagar
+                  </button>
+                )}
+              </div>
             </div>
-            <h1 className="text-4xl font-bold font-space-grotesk tracking-tight text-white mb-1">
-              {run.projectName}
-            </h1>
-            <p className="text-on-surface-variant text-sm flex items-center gap-2">
-              <Icon name="account_tree" className="text-base" />
-              {run.branch}
-            </p>
           </header>
 
+          {/* Tabs */}
+          <div className="flex gap-1 bg-surface-container-highest rounded-xl p-1 mb-6 w-fit">
+            <button
+              onClick={() => setActiveTab('steps')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === 'steps'
+                  ? 'bg-surface-container-high text-on-surface'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+            >
+              <Icon name="account_tree" size={14} />
+              Steps
+              {totalSteps > 0 && (
+                <span className="text-[10px] text-on-surface-variant ml-1">{completedSteps}/{totalSteps}</span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('logs')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === 'logs'
+                  ? 'bg-surface-container-high text-on-surface'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+            >
+              <Icon name="receipt_long" size={14} />
+              Logs
+              {runLogs && runLogs.length > 0 && (
+                <span className="text-[10px] text-on-surface-variant ml-1">{runLogs.length}</span>
+              )}
+            </button>
+          </div>
+
+          {activeTab === 'steps' && (
+            <>
           {/* Progress bar */}
           {totalSteps > 0 && (
             <div className="glass-effect rounded-xl p-5 border border-white/5 mb-6">
@@ -201,8 +317,21 @@ export function RunDetailPage() {
                           `Concluído em ${new Date(step.completedAt).toLocaleTimeString('pt-BR')}`}
                         {step.status === 'error' && 'Erro na execução'}
                         {step.status === 'pending' && 'Aguardando...'}
+                        {step.status === 'skipped' && 'Ignorado'}
                       </p>
                     </div>
+
+                    {/* Skip button for pending steps while run is active */}
+                    {step.status === 'pending' && isActive(run.status) && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); skipStepMutation.mutate({ stepResultId: step.id }) }}
+                        disabled={skipStepMutation.isPending}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-on-surface-variant hover:text-on-surface bg-surface-container-highest hover:bg-surface-bright border border-white/5 transition-colors"
+                      >
+                        <Icon name="skip_next" size={12} />
+                        Skip
+                      </button>
+                    )}
 
                     {/* Output ports badges */}
                     <div className="flex gap-1">
@@ -326,6 +455,70 @@ export function RunDetailPage() {
                 <h2 className="text-sm font-bold text-error mb-1">Pipeline falhou</h2>
                 <p className="text-on-surface-variant text-sm">{run.summary || 'Erro desconhecido.'}</p>
               </div>
+            </div>
+          )}
+            </>
+          )}
+
+          {/* Logs Tab */}
+          {activeTab === 'logs' && (
+            <div className="space-y-1 mb-6">
+              {!runLogs || runLogs.length === 0 ? (
+                <div className="text-center py-16 text-on-surface-variant">
+                  <Icon name="receipt_long" size={32} className="mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">Nenhum log disponível para este run.</p>
+                  {isActive(run.status) && (
+                    <p className="text-xs mt-1 opacity-60">Logs aparecerão conforme o run avança.</p>
+                  )}
+                </div>
+              ) : (
+                runLogs.map((log) => {
+                  const LEVEL_COLORS: Record<string, string> = {
+                    debug: 'text-on-surface-variant/60 bg-surface-container-highest',
+                    info: 'text-primary bg-primary/10',
+                    warn: 'text-orange-400 bg-orange-500/10',
+                    error: 'text-error bg-error/10',
+                  }
+                  const CATEGORY_ICONS: Record<string, string> = {
+                    run: 'play_circle', step: 'looks_one', ai: 'smart_toy', binding: 'cable', system: 'settings',
+                  }
+                  const parsed = log.metadata ? (() => { try { return JSON.parse(log.metadata) } catch { return null } })() : null
+
+                  return (
+                    <div key={log.id} className="bg-surface-container-low rounded-xl border border-white/5 px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 mt-0.5 ${LEVEL_COLORS[log.level] ?? LEVEL_COLORS.info}`}>
+                          {log.level.toUpperCase()}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] text-on-surface-variant/50 font-mono">
+                              {new Date(log.createdAt).toLocaleTimeString('pt-BR', { hour12: false })}
+                            </span>
+                            <span className="text-[10px] text-on-surface-variant/40 font-mono">{log.event}</span>
+                            <Icon name={CATEGORY_ICONS[log.category] ?? 'settings'} size={10} className="text-on-surface-variant/40" />
+                          </div>
+                          <p className="text-sm text-on-surface mt-0.5">{log.message}</p>
+                          {parsed && (
+                            <div className="mt-1">
+                              {expandedLogMeta.has(log.id) ? (
+                                <>
+                                  <button onClick={() => toggleLogMeta(log.id)} className="text-[10px] text-primary/60 hover:text-primary underline">ocultar metadata</button>
+                                  <pre className="text-[10px] bg-surface-container-highest rounded-lg p-2 mt-1 overflow-x-auto text-on-surface/70 whitespace-pre-wrap break-all max-h-40">
+                                    {JSON.stringify(parsed, null, 2)}
+                                  </pre>
+                                </>
+                              ) : (
+                                <button onClick={() => toggleLogMeta(log.id)} className="text-[10px] text-primary/60 hover:text-primary underline">ver metadata</button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
             </div>
           )}
 

@@ -4,6 +4,8 @@ import { Icon } from '../ui/Icon'
 const navItems = [
   { to: '/', label: 'Overview', icon: 'dashboard', end: true },
   { to: '/run/new', label: 'Runs', icon: 'play_circle' },
+  { to: '/tasks', label: 'Tasks', icon: 'task_alt' },
+  { to: '/logs', label: 'Logs', icon: 'receipt_long' },
   { to: '/nodes', label: 'Nodes', icon: 'lan' },
   { to: '/workflows', label: 'Workflows', icon: 'account_tree' },
   { to: '#', label: 'Vault', icon: 'lock' },

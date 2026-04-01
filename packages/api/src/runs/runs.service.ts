@@ -1,9 +1,12 @@
 import { readdirSync, readFileSync, statSync } from 'fs'
 import { join, relative, extname } from 'path'
-import { eq, desc, asc } from 'drizzle-orm'
+import { eq, desc, asc, inArray } from 'drizzle-orm'
 import type { Db } from '../db'
 import { pipelineRuns, runStepResults, workflowSteps, aiNodes } from '../db/schema'
 import type { CopilotService } from '../ai/service'
+import type { LoggingCopilotProxy } from '../ai/logging-copilot.proxy'
+import type { TasksService } from '../tasks/tasks.service'
+import type { LoggingService } from '../logging/logging.service'
 import type { StepConfig, Binding } from '../types/io-ports'
 
 const IGNORED_DIRS = new Set([
@@ -69,6 +72,7 @@ function buildProjectContext(projectName: string, branch: string, files: FileEnt
 }
 
 export interface CreateRunInput {
+  taskId: number
   projectName: string
   projectPath: string
   branch: string
@@ -130,12 +134,13 @@ function resolveBinding(
 }
 
 export class RunsService {
-  constructor(private readonly db: Db) {}
+  constructor(private readonly db: Db, private readonly logger?: LoggingService) {}
 
   async create(input: CreateRunInput) {
     const result = await this.db
       .insert(pipelineRuns)
       .values({
+        taskId: input.taskId,
         projectName: input.projectName,
         projectPath: input.projectPath,
         branch: input.branch,
@@ -193,9 +198,65 @@ export class RunsService {
       .orderBy(asc(runStepResults.position))
   }
 
-  async execute(id: number, copilotService: CopilotService): Promise<void> {
+  async cancel(id: number) {
+    const run = await this.get(id)
+    if (!run) throw new Error('Run not found')
+    if (run.status !== 'pending' && run.status !== 'running') {
+      throw new Error(`Cannot cancel run with status "${run.status}"`)
+    }
+    await this.db
+      .update(pipelineRuns)
+      .set({ status: 'cancelled', completedAt: new Date().toISOString() })
+      .where(eq(pipelineRuns.id, id))
+    this.logger?.log({
+      level: 'warn',
+      category: 'run',
+      event: 'run.cancelled',
+      runId: id,
+      message: `Run #${id} cancelled by user`,
+    })
+  }
+
+  async delete(id: number) {
+    const run = await this.get(id)
+    if (!run) throw new Error('Run not found')
+    if (run.status === 'pending' || run.status === 'running') {
+      throw new Error('Cannot delete an active run. Cancel it first.')
+    }
+    await this.db.delete(runStepResults).where(eq(runStepResults.runId, id))
+    await this.db.delete(pipelineRuns).where(eq(pipelineRuns.id, id))
+  }
+
+  async skipStep(stepResultId: number) {
+    const rows = await this.db
+      .select()
+      .from(runStepResults)
+      .where(eq(runStepResults.id, stepResultId))
+      .limit(1)
+    const step = rows[0]
+    if (!step) throw new Error('Step not found')
+    if (step.status !== 'pending') {
+      throw new Error(`Cannot skip step with status "${step.status}"`)
+    }
+    await this.db
+      .update(runStepResults)
+      .set({ status: 'skipped', completedAt: new Date().toISOString() })
+      .where(eq(runStepResults.id, stepResultId))
+    this.logger?.log({
+      level: 'warn',
+      category: 'step',
+      event: 'step.skipped',
+      runId: step.runId,
+      stepResultId,
+      message: `Step skipped by user`,
+    })
+  }
+
+  async execute(id: number, copilotService: CopilotService | LoggingCopilotProxy, tasksService: TasksService): Promise<void> {
     const run = await this.get(id)
     if (!run) return
+
+    const runStartMs = Date.now()
 
     await this.db
       .update(pipelineRuns)
@@ -210,12 +271,21 @@ export class RunsService {
       const projectContext = buildProjectContext(run.projectName, run.branch, files)
 
       // Task data available for bindings
+      const task = run.taskId ? await tasksService.get(run.taskId) : null
       const taskData: Record<string, string> = {
+        task_name: task?.name ?? run.projectName,
+        task_description: task?.description ?? '',
         files: projectContext,
         project_name: run.projectName,
         branch: run.branch,
         project_path: run.projectPath,
       }
+
+      this.logger?.logRunStarted(id, {
+        taskName: task?.name,
+        projectPath: run.projectPath,
+        workflowId: run.workflowId,
+      })
 
       // Fetch workflow steps with their node definitions
       const steps = run.workflowId
@@ -240,30 +310,100 @@ export class RunsService {
         throw new Error('Workflow has no steps configured')
       }
 
+      // Pre-create all step results as 'pending' so they are immediately visible in the UI
+      // and so the user can skip individual steps before they execute
+      const preCreated = await this.db
+        .insert(runStepResults)
+        .values(
+          steps.map((step) => ({
+            runId: id,
+            stepId: step.id,
+            nodeId: step.nodeId,
+            position: step.position,
+            status: 'pending' as const,
+            startedAt: new Date().toISOString(),
+          }))
+        )
+        .returning({ id: runStepResults.id, position: runStepResults.position })
+
+      // Map position → pre-created step result ID
+      const stepResultIdByPosition = new Map(preCreated.map((r) => [r.position, r.id]))
+
       // Store outputs by step position for binding resolution
       const stepOutputs: Map<number, string> = new Map()
       let lastOutput = ''
 
       for (const step of steps) {
+        // Check if run was cancelled between steps
+        const freshRun = await this.get(id)
+        if (freshRun?.status === 'cancelled') {
+          // Mark remaining pending steps as skipped
+          const pendingIds = steps
+            .filter((s) => s.position >= step.position)
+            .map((s) => stepResultIdByPosition.get(s.position))
+            .filter((sid): sid is number => sid !== undefined)
+          if (pendingIds.length > 0) {
+            await this.db
+              .update(runStepResults)
+              .set({ status: 'skipped', completedAt: new Date().toISOString() })
+              .where(inArray(runStepResults.id, pendingIds))
+          }
+          return
+        }
+
+        const stepResultId = stepResultIdByPosition.get(step.position)!
+
+        // Check if this step was skipped by the user before it ran
+        const stepRow = await this.db
+          .select({ status: runStepResults.status })
+          .from(runStepResults)
+          .where(eq(runStepResults.id, stepResultId))
+          .limit(1)
+        if (stepRow[0]?.status === 'skipped') {
+          this.logger?.log({
+            level: 'info',
+            category: 'step',
+            event: 'step.skipped',
+            runId: id,
+            stepResultId,
+            message: `Step #${step.position + 1} "${step.name}" skipped`,
+          })
+          continue
+        }
+
         // Resolve input from bindings or fallback to previous output / project context
         const stepConfig = parseStepConfig(step.config)
+
+        // Log individual binding resolutions
+        for (const [portKey, binding] of Object.entries(stepConfig.bindings)) {
+          this.logger?.logBindingResolved(id, stepResultId, portKey, binding.source, binding.field, step.position)
+        }
+
         const resolvedInput = resolveBindings(stepConfig, taskData, stepOutputs, step.position, projectContext)
 
-        const [stepResult] = await this.db
-          .insert(runStepResults)
-          .values({
-            runId: id,
-            stepId: step.id,
-            nodeId: step.nodeId,
-            position: step.position,
-            status: 'running',
-            input: resolvedInput.slice(0, 10000),
-            startedAt: new Date().toISOString(),
-          })
-          .returning({ id: runStepResults.id })
+        // Update step to running
+        await this.db
+          .update(runStepResults)
+          .set({ status: 'running', input: resolvedInput.slice(0, 10000), startedAt: new Date().toISOString() })
+          .where(eq(runStepResults.id, stepResultId))
+
+        this.logger?.logStepStarted(id, stepResultId, {
+          position: step.position,
+          nodeName: step.name,
+          stepId: step.id,
+        })
+        this.logger?.logStepInputResolved(id, stepResultId, resolvedInput, step.position)
+
+        // Set context on proxy so AI logs carry runId + stepResultId
+        if ('setContext' in copilotService) {
+          (copilotService as LoggingCopilotProxy).setContext(id, stepResultId)
+        }
 
         try {
-          const prompt = `${step.systemPrompt}\n\n--- INPUT ---\n\n${resolvedInput}`
+          const systemPrompt = step.systemPrompt ?? ''
+          const prompt = systemPrompt.includes('[input]')
+            ? systemPrompt.replace(/\[input\]/gi, resolvedInput)
+            : `${systemPrompt}\n\n--- INPUT ---\n\n${resolvedInput}`
           const result = await copilotService.query({
             prompt,
             model: step.model || undefined,
@@ -279,7 +419,9 @@ export class RunsService {
               output: lastOutput,
               completedAt: new Date().toISOString(),
             })
-            .where(eq(runStepResults.id, stepResult.id))
+            .where(eq(runStepResults.id, stepResultId))
+
+          this.logger?.logStepCompleted(id, stepResultId, lastOutput, step.position)
         } catch (stepErr) {
           const errorMsg = stepErr instanceof Error ? stepErr.message : 'Unknown step error'
           await this.db
@@ -289,8 +431,9 @@ export class RunsService {
               output: errorMsg,
               completedAt: new Date().toISOString(),
             })
-            .where(eq(runStepResults.id, stepResult.id))
+            .where(eq(runStepResults.id, stepResultId))
 
+          this.logger?.logStepFailed(id, stepResultId, errorMsg, step.position, step.name)
           throw new Error(`Step "${step.name}" failed: ${errorMsg}`)
         }
       }
@@ -323,15 +466,27 @@ export class RunsService {
           completedAt: new Date().toISOString(),
         })
         .where(eq(pipelineRuns.id, id))
+
+      this.logger?.logRunCompleted(id, {
+        durationMs: Date.now() - runStartMs,
+        score,
+        status: 'completed',
+      })
     } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+      // Don't overwrite 'cancelled' status
+      const currentRun = await this.get(id)
+      if (currentRun?.status === 'cancelled') return
       await this.db
         .update(pipelineRuns)
         .set({
           status: 'error',
-          summary: err instanceof Error ? err.message : 'Unknown error',
+          summary: errorMsg,
           completedAt: new Date().toISOString(),
         })
         .where(eq(pipelineRuns.id, id))
+
+      this.logger?.logRunFailed(id, errorMsg)
     }
   }
 }

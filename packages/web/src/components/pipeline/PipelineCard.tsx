@@ -27,9 +27,10 @@ interface PipelineCardProps {
   onResume?: () => void
   onRetry?: () => void
   onLogs?: () => void
+  onDelete?: () => void
 }
 
-export function PipelineCard({ pipeline, score, onClick, onStart, onStop, onSkip, onResume, onRetry, onLogs }: PipelineCardProps) {
+export function PipelineCard({ pipeline, score, onClick, onStart, onStop, onSkip, onResume, onRetry, onLogs, onDelete }: PipelineCardProps) {
   const { status } = pipeline
 
   return (
@@ -79,6 +80,9 @@ export function PipelineCard({ pipeline, score, onClick, onStart, onStop, onSkip
           )}
           {status === 'completed' && (
             <ActionButton onClick={onLogs} icon="visibility" label="Ver análise" />
+          )}
+          {(status === 'stopped' || status === 'completed') && onDelete && (
+            <ActionButton onClick={onDelete} icon="delete" label="Apagar" variant="error" />
           )}
         </div>
       </div>

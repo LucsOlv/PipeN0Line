@@ -43,6 +43,20 @@
       "when": 1774604322668,
       "tag": "0005_add_io_ports",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1743374713970,
+      "tag": "0006_add_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1743375060000,
+      "tag": "0007_add_system_logs",
+      "breakpoints": true
     }
   ]
 }

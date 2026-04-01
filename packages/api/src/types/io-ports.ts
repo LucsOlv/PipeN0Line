@@ -28,6 +28,8 @@ export type StepConfig = z.infer<typeof stepConfigSchema>
 
 /** Built-in task fields available as data sources */
 export const TASK_FIELDS: IOPort[] = [
+  { key: 'task_name', label: 'Nome da Task', type: 'text', required: true },
+  { key: 'task_description', label: 'Descrição da Task', type: 'text', required: false },
   { key: 'files', label: 'Arquivos do Projeto', type: 'files', required: true },
   { key: 'project_name', label: 'Nome do Projeto', type: 'text', required: true },
   { key: 'branch', label: 'Branch', type: 'text', required: true },

@@ -25,6 +25,8 @@ const start = async () => {
                 runsService: server.runsService,
                 nodesService: server.nodesService,
                 workflowsService: server.workflowsService,
+                tasksService: server.tasksService,
+                loggingService: server.loggingService,
             }),
         },
     });
